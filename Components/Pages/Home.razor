@@ -1,0 +1,239 @@
+@page "/"
+@rendermode InteractiveServer
+@inject ValveSpecsService Svc
+
+<PageTitle>ValveSpecs — Critical Dimensions</PageTitle>
+
+<div class="workspace">
+
+    <!-- ══ LEFT PANEL ════════════════════════════════════════════ -->
+    <aside class="selector-panel">
+        <div class="panel-header">
+            <span class="panel-label">SELECT VALVE</span>
+        </div>
+
+        <div class="select-group">
+            <label class="select-label">Manufacturer</label>
+            @if (_manufacturers is null)
+            {
+                <div class="loading-pulse">Loading…</div>
+            }
+            else
+            {
+                <div class="mfr-list">
+                    @foreach (var mfr in _manufacturers)
+                    {
+                        <button class="mfr-btn @(mfr == _selectedMfr ? "active" : "")"
+                                @onclick="() => SelectManufacturer(mfr)">@mfr</button>
+                    }
+                </div>
+            }
+        </div>
+
+        @if (_models is not null && _models.Count > 0)
+        {
+            <div class="select-group" style="margin-top:1.5rem">
+                <label class="select-label">Model</label>
+                <div class="model-list">
+                    @foreach (var m in _models)
+                    {
+                        <button class="model-btn @(m.Id == _selectedModelId ? "active" : "")"
+                                @onclick="() => SelectModel(m.Id)">
+                            <span class="model-number">@m.ModelNumber</span>
+                            <span class="model-status status-@m.VerificationStatus.ToLower()">
+                                @m.VerificationStatus
+                            </span>
+                        </button>
+                    }
+                </div>
+            </div>
+        }
+        else if (_selectedMfr is not null && _models is not null)
+        {
+            <p class="empty-hint">No models found.</p>
+        }
+    </aside>
+
+    <!-- ══ RIGHT PANEL ═══════════════════════════════════════════ -->
+    <section class="detail-panel">
+
+        @if (_loading)
+        {
+            <div class="loading-state">
+                <div class="spinner"></div>
+                <span>Loading…</span>
+            </div>
+        }
+        else if (_detail is null)
+        {
+            <div class="empty-state">
+                <span class="empty-icon">◈</span>
+                <p>Select a manufacturer and model<br />to view critical dimensions.</p>
+            </div>
+        }
+        else
+        {
+            var d = _detail;
+            var model = d.Model;
+
+            <div class="detail-header">
+                <div class="detail-title-row">
+                    <div>
+                        <h1 class="detail-model-number">@model.ModelNumber</h1>
+                        <p class="detail-family">
+                            @model.Manufacturer?.Name
+                            @if (model.ModelFamily is not null)
+                            {
+                                <span> · @model.ModelFamily.FamilyName</span>
+                            }
+                        </p>
+                    </div>
+                    <span class="verify-badge status-@model.VerificationStatus.ToLower()">
+                        @model.VerificationStatus
+                    </span>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(model.VerificationNotes))
+                {
+                    <p class="detail-vnotes">@model.VerificationNotes</p>
+                }
+            </div>
+
+            <!-- ── Critical Dimensions ────────────────────────── -->
+            <div class="section">
+                <div class="section-header">
+                    <span class="section-title">CRITICAL DIMENSIONS</span>
+                </div>
+
+                <div class="dim-grid">
+                    @foreach (var dim in DimHelper.All(d.Specs, d.SourceText))
+                    {
+                        // Build the full tooltip text
+                        var tooltipParts = new List<string>();
+                        if (!string.IsNullOrWhiteSpace(dim.SourceText))
+                            tooltipParts.Add("Source: " + dim.SourceText);
+                        if (!string.IsNullOrWhiteSpace(dim.DimNotes))
+                            tooltipParts.Add(dim.DimNotes);
+                        var tooltip = string.Join("\n", tooltipParts);
+                        var hasTooltip = !string.IsNullOrWhiteSpace(tooltip);
+
+                        <div class="dim-card dim-@dim.Status.ToString().ToLower() @(hasTooltip ? "has-tooltip" : "")"
+                             title="@tooltip">
+                            <span class="dim-label">@dim.Label</span>
+
+                            @if (dim.Status == DimStatus.Value)
+                            {
+                                <span class="dim-value">
+                                    @dim.Value!.Value.ToString("0.000")
+                                    <span class="dim-unit">@dim.Unit</span>
+                                </span>
+                            }
+                            else if (dim.Status == DimStatus.ConfirmedNa)
+                            {
+                                <span class="dim-na">N/A</span>
+                                <span class="dim-na-label">CONFIRMED</span>
+                            }
+                            else
+                            {
+                                <span class="dim-na dim-nospec">—</span>
+                                <span class="dim-na-label">NOT PUBLISHED</span>
+                            }
+
+                            @if (!string.IsNullOrWhiteSpace(dim.SourceText))
+                            {
+                                <span class="dim-source">@dim.SourceText</span>
+                            }
+
+                            @if (hasTooltip)
+                            {
+                                <span class="dim-info-icon" title="@tooltip">ⓘ</span>
+                            }
+
+                            @if (dim.SpecId != 0)
+                            {
+                                @if (dim.IsApproved)
+                                {
+                                    <button class="dim-approved-badge"
+                                            title="Approved by @dim.ApprovedBy on @dim.ApprovedAt?.ToLocalTime().ToString("MMM d, yyyy h:mm tt")\nClick to unapprove"
+                                            @onclick="() => ToggleApproval(dim)">
+                                        ✓ Approved
+                                    </button>
+                                }
+                                else
+                                {
+                                    <button class="dim-approve-btn"
+                                            @onclick="() => ToggleApproval(dim)">
+                                        Approve
+                                    </button>
+                                }
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- ── Technical Notes ────────────────────────────── -->
+            @if (d.Notes.Count > 0)
+            {
+                <div class="section">
+                    <div class="section-header">
+                        <span class="section-title">TECHNICAL NOTES</span>
+                    </div>
+                    <div class="notes-list">
+                        @foreach (var note in d.Notes)
+                        {
+                            <details class="note-item">
+                                <summary class="note-summary">
+                                    <span class="note-type-badge">@FormatNoteType(note.NoteType)</span>
+                                </summary>
+                                <p class="note-body">@note.NoteText</p>
+                            </details>
+                        }
+                    </div>
+                </div>
+            }
+        }
+    </section>
+</div>
+
+@code {
+    private List<string>?     _manufacturers;
+    private List<ValveModel>? _models;
+    private string?           _selectedMfr;
+    private int?              _selectedModelId;
+    private ValveDetail?      _detail;
+    private bool              _loading;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _manufacturers = await Svc.GetManufacturersAsync();
+    }
+
+    private async Task SelectManufacturer(string mfr)
+    {
+        if (_selectedMfr == mfr) return;
+        _selectedMfr     = mfr;
+        _selectedModelId = null;
+        _detail          = null;
+        _models          = await Svc.GetModelsAsync(mfr);
+    }
+
+    private async Task SelectModel(int modelId)
+    {
+        if (_selectedModelId == modelId) return;
+        _selectedModelId = modelId;
+        _loading         = true;
+        _detail          = null;
+        StateHasChanged();
+        _detail  = await Svc.GetValveDetailAsync(modelId);
+        _loading = false;
+    }
+
+    private static string FormatNoteType(string raw) => raw.Replace("_", " ");
+
+    private async Task ToggleApproval(DimDisplay dim)
+    {
+        if (dim.SpecId == 0 || _selectedModelId is null) return;
+        await Svc.SetApprovalAsync(dim.SpecId, !dim.IsApproved);
+        _detail = await Svc.GetValveDetailAsync(_selectedModelId.Value);
+    }
+}

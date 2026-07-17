@@ -1,0 +1,14 @@
+@using ValveSpecsViewer.Components.Layout
+
+<Router AppAssembly="@typeof(App).Assembly">
+    <Found Context="routeData">
+        <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
+        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    </Found>
+    <NotFound>
+        <PageTitle>Not Found</PageTitle>
+        <LayoutView Layout="@typeof(MainLayout)">
+            <p class="not-found">Sorry, this address doesn't exist.</p>
+        </LayoutView>
+    </NotFound>
+</Router>
