@@ -1,4 +1,5 @@
 @page "/"
+@attribute [Authorize]
 @rendermode InteractiveServer
 @inject ValveSpecsService Svc
 
@@ -40,9 +41,16 @@
                         <button class="model-btn @(m.Id == _selectedModelId ? "active" : "")"
                                 @onclick="() => SelectModel(m.Id)">
                             <span class="model-number">@m.ModelNumber</span>
-                            <span class="model-status status-@m.VerificationStatus.ToLower()">
-                                @m.VerificationStatus
-                            </span>
+                            @if (m.ModelRejected)
+                            {
+                                <span class="model-status status-rejected">REJECTED</span>
+                            }
+                            else
+                            {
+                                <span class="model-status status-@m.VerificationStatus.ToLower()">
+                                    @m.VerificationStatus
+                                </span>
+                            }
                         </button>
                     }
                 </div>
@@ -88,13 +96,41 @@
                             }
                         </p>
                     </div>
-                    <span class="verify-badge status-@model.VerificationStatus.ToLower()">
-                        @model.VerificationStatus
-                    </span>
+                    <div class="detail-badges">
+                        @if (model.ModelRejected)
+                        {
+                            <span class="verify-badge status-rejected">REJECTED</span>
+                        }
+                        else
+                        {
+                            <span class="verify-badge status-@model.VerificationStatus.ToLower()">
+                                @model.VerificationStatus
+                            </span>
+                        }
+                        <AuthorizeView Roles="Approver,Admin">
+                            <Authorized>
+                                @if (model.ModelRejected)
+                                {
+                                    <button class="btn-outline" @onclick="UnrejectModel">Un-reject Model</button>
+                                }
+                                else
+                                {
+                                    <button class="btn-outline-danger" @onclick="OpenRejectModelModal">Reject Model</button>
+                                }
+                            </Authorized>
+                        </AuthorizeView>
+                    </div>
                 </div>
                 @if (!string.IsNullOrWhiteSpace(model.VerificationNotes))
                 {
                     <p class="detail-vnotes">@model.VerificationNotes</p>
+                }
+                @if (model.ModelRejected)
+                {
+                    <div class="model-rejected-banner">
+                        <strong>MODEL REJECTED</strong> by @model.ModelRejectedBy on @model.ModelRejectedAt?.ToLocalTime().ToString("MMM d, yyyy h:mm tt")
+                        <p>@model.ModelRejectionNotes</p>
+                    </div>
                 }
             </div>
 
@@ -105,42 +141,73 @@
                 </div>
 
                 <div class="dim-grid">
-                    @foreach (var dim in DimHelper.All(d.Specs, d.SourceText))
+                    @foreach (var dim in DimHelper.All(d.Specs, d.SourceText, d.CorrectedSourceText))
                     {
+                        var isRejected = dim.ReviewStatus == ReviewStatus.Rejected;
+
                         // Build the full tooltip text
                         var tooltipParts = new List<string>();
                         if (!string.IsNullOrWhiteSpace(dim.SourceText))
                             tooltipParts.Add("Source: " + dim.SourceText);
                         if (!string.IsNullOrWhiteSpace(dim.DimNotes))
                             tooltipParts.Add(dim.DimNotes);
+                        if (isRejected && !string.IsNullOrWhiteSpace(dim.RejectionNotes))
+                            tooltipParts.Add("Rejected: " + dim.RejectionNotes);
                         var tooltip = string.Join("\n", tooltipParts);
                         var hasTooltip = !string.IsNullOrWhiteSpace(tooltip);
 
-                        <div class="dim-card dim-@dim.Status.ToString().ToLower() @(hasTooltip ? "has-tooltip" : "")"
+                        <div class="dim-card dim-@dim.Status.ToString().ToLower() @(isRejected ? "dim-rejected" : "") @(hasTooltip ? "has-tooltip" : "")"
                              title="@tooltip">
                             <span class="dim-label">@dim.Label</span>
 
-                            @if (dim.Status == DimStatus.Value)
+                            @if (isRejected)
                             {
-                                <span class="dim-value">
-                                    @dim.Value!.Value.ToString("0.000")
-                                    <span class="dim-unit">@dim.Unit</span>
-                                </span>
-                            }
-                            else if (dim.Status == DimStatus.ConfirmedNa)
-                            {
-                                <span class="dim-na">N/A</span>
-                                <span class="dim-na-label">CONFIRMED</span>
+                                <div class="dim-correction">
+                                    <div class="dim-correction-row">
+                                        <span class="dim-correction-label">Original</span>
+                                        <span class="dim-original-value">@OriginalValueText(dim)</span>
+                                    </div>
+                                    @if (dim.CorrectedValue.HasValue)
+                                    {
+                                        <div class="dim-correction-row">
+                                            <span class="dim-correction-label">Corrected</span>
+                                            <span class="dim-corrected-value">@dim.CorrectedValue.Value.ToString("0.000") @dim.Unit</span>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <span class="dim-na-label">NO CORRECTION YET</span>
+                                    }
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(dim.CorrectedSourceText))
+                                {
+                                    <span class="dim-source">Correction: @dim.CorrectedSourceText</span>
+                                }
                             }
                             else
                             {
-                                <span class="dim-na dim-nospec">—</span>
-                                <span class="dim-na-label">NOT PUBLISHED</span>
-                            }
+                                @if (dim.Status == DimStatus.Value)
+                                {
+                                    <span class="dim-value">
+                                        @dim.Value!.Value.ToString("0.000")
+                                        <span class="dim-unit">@dim.Unit</span>
+                                    </span>
+                                }
+                                else if (dim.Status == DimStatus.ConfirmedNa)
+                                {
+                                    <span class="dim-na">N/A</span>
+                                    <span class="dim-na-label">CONFIRMED</span>
+                                }
+                                else
+                                {
+                                    <span class="dim-na dim-nospec">—</span>
+                                    <span class="dim-na-label">NOT PUBLISHED</span>
+                                }
 
-                            @if (!string.IsNullOrWhiteSpace(dim.SourceText))
-                            {
-                                <span class="dim-source">@dim.SourceText</span>
+                                @if (!string.IsNullOrWhiteSpace(dim.SourceText))
+                                {
+                                    <span class="dim-source">@dim.SourceText</span>
+                                }
                             }
 
                             @if (hasTooltip)
@@ -150,21 +217,68 @@
 
                             @if (dim.SpecId != 0)
                             {
-                                @if (dim.IsApproved)
-                                {
-                                    <button class="dim-approved-badge"
-                                            title="Approved by @dim.ApprovedBy on @dim.ApprovedAt?.ToLocalTime().ToString("MMM d, yyyy h:mm tt")\nClick to unapprove"
-                                            @onclick="() => ToggleApproval(dim)">
-                                        ✓ Approved
-                                    </button>
-                                }
-                                else
-                                {
-                                    <button class="dim-approve-btn"
-                                            @onclick="() => ToggleApproval(dim)">
-                                        Approve
-                                    </button>
-                                }
+                                <AuthorizeView Roles="Approver,Admin" Context="reviewCtx">
+                                    <Authorized>
+                                        @if (dim.Status == DimStatus.ConfirmedNa && dim.ReviewStatus == ReviewStatus.Approved)
+                                        {
+                                            <div class="dim-review-actions">
+                                                <button class="dim-approved-badge"
+                                                        title="@ReviewTooltip(dim, "Confirmed N/A")"
+                                                        @onclick="() => ClearNaDim(dim)">
+                                                    ✓ N/A confirmed
+                                                </button>
+                                            </div>
+                                        }
+                                        else if (dim.ReviewStatus == ReviewStatus.Unreviewed)
+                                        {
+                                            <div class="dim-review-actions">
+                                                @if (dim.Status != DimStatus.NoSpec)
+                                                {
+                                                    <button class="dim-approve-btn" @onclick="() => ApproveDim(dim)">Approve</button>
+                                                    <button class="dim-reject-btn" @onclick="() => OpenRejectModal(dim)">Reject</button>
+                                                }
+                                                <button class="dim-na-btn" @onclick="() => OpenNaModal(dim)">Mark N/A</button>
+                                            </div>
+                                        }
+                                        else if (dim.ReviewStatus == ReviewStatus.Approved)
+                                        {
+                                            <div class="dim-review-actions">
+                                                <button class="dim-approved-badge"
+                                                        title="@ReviewTooltip(dim, "Approved")"
+                                                        @onclick="() => UnreviewDim(dim)">
+                                                    ✓ Approved
+                                                </button>
+                                                <button class="dim-reject-link" @onclick="() => OpenRejectModal(dim)">Reject</button>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div class="dim-review-actions">
+                                                <button class="dim-rejected-badge"
+                                                        title="@ReviewTooltip(dim, "Rejected")"
+                                                        @onclick="() => UnreviewDim(dim)">
+                                                    ✗ Rejected
+                                                </button>
+                                                <button class="dim-approve-link" @onclick="() => ApproveDim(dim)">Approve</button>
+                                                <button class="dim-na-btn" @onclick="() => OpenNaModal(dim)">Mark N/A</button>
+                                            </div>
+                                        }
+                                    </Authorized>
+                                    <NotAuthorized>
+                                        @if (dim.ReviewStatus == ReviewStatus.Approved)
+                                        {
+                                            <div class="dim-review-actions">
+                                                <span class="dim-approved-badge dim-badge-static" title="@ReviewTooltip(dim, "Approved", clickable: false)">✓ Approved</span>
+                                            </div>
+                                        }
+                                        else if (dim.ReviewStatus == ReviewStatus.Rejected)
+                                        {
+                                            <div class="dim-review-actions">
+                                                <span class="dim-rejected-badge dim-badge-static" title="@ReviewTooltip(dim, "Rejected", clickable: false)">✗ Rejected</span>
+                                            </div>
+                                        }
+                                    </NotAuthorized>
+                                </AuthorizeView>
                             }
                         </div>
                     }
@@ -191,9 +305,143 @@
                     </div>
                 </div>
             }
+
+            <!-- ── Related Documents ──────────────────────────── -->
+            @if (d.RelatedDocuments.Count > 0)
+            {
+                <div class="section">
+                    <div class="section-header">
+                        <span class="section-title">RELATED DOCUMENTS</span>
+                    </div>
+                    <div class="doc-list">
+                        @foreach (var doc in d.RelatedDocuments)
+                        {
+                            <div class="doc-row">
+                                <div class="doc-info">
+                                    <span class="doc-title">@doc.Title</span>
+                                    <div class="doc-meta">
+                                        @if (!string.IsNullOrWhiteSpace(doc.DocumentNumber))
+                                        {
+                                            <span class="doc-catalog">@doc.DocumentNumber</span>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(doc.Revision))
+                                        {
+                                            <span class="doc-date">Rev. @doc.Revision</span>
+                                        }
+                                    </div>
+                                </div>
+                                @if (doc.FileData is not null)
+                                {
+                                    <a class="doc-download" href="/documents/@doc.Id/download">Download</a>
+                                }
+                                else
+                                {
+                                    <span class="doc-no-file">Not uploaded yet</span>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
         }
     </section>
 </div>
+
+@if (_rejectingDim is not null)
+{
+    <div class="modal-overlay" @onclick="CloseRejectModal">
+        <div class="modal-card" @onclick:stopPropagation="true">
+            <div class="modal-header">Reject: @_rejectingDim.Label</div>
+            <div class="modal-body">
+                <div class="field-group">
+                    <label class="field-label">Rejection reason (required)</label>
+                    <textarea class="field-input" @bind="_rejectForm.Notes"></textarea>
+                </div>
+                <div class="field-group">
+                    <label class="field-label">Corrected value (optional)</label>
+                    <input class="field-input" type="number" step="0.001" @bind="_rejectForm.CorrectedValue" />
+                </div>
+                <div class="field-group">
+                    <label class="field-label">Corrected source document (optional)</label>
+                    <select class="field-input" @bind="_rejectForm.CorrectedDocumentFileId">
+                        <option value="">— none —</option>
+                        @if (_rejectDocs is not null)
+                        {
+                            @foreach (var doc in _rejectDocs)
+                            {
+                                <option value="@doc.Id">@doc.Title</option>
+                            }
+                        }
+                    </select>
+                </div>
+                <div class="field-group">
+                    <label class="field-label">Corrected page notes (optional)</label>
+                    <input class="field-input" @bind="_rejectForm.CorrectedPageNotes" />
+                </div>
+                @if (!string.IsNullOrEmpty(_rejectFormError))
+                {
+                    <p class="login-error">@_rejectFormError</p>
+                }
+            </div>
+            <div class="modal-actions">
+                <button class="btn-outline" @onclick="CloseRejectModal">Cancel</button>
+                <button class="btn-danger" @onclick="SubmitReject">Reject</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_naDim is not null)
+{
+    <div class="modal-overlay" @onclick="CloseNaModal">
+        <div class="modal-card" @onclick:stopPropagation="true">
+            <div class="modal-header">Mark Not Applicable: @_naDim.Label</div>
+            <div class="modal-body">
+                <p>
+                    Records that this dimension does not apply to this valve, or is not published
+                    for it. This is a sign-off, not a rejection — use <strong>Reject</strong>
+                    instead if a published value exists but is wrong.
+                </p>
+                <div class="field-group">
+                    <label class="field-label">Reason (required)</label>
+                    <textarea class="field-input" @bind="_naReason"
+                              placeholder="e.g. Not published in the applicable maintenance manual"></textarea>
+                </div>
+                @if (!string.IsNullOrEmpty(_naFormError))
+                {
+                    <p class="login-error">@_naFormError</p>
+                }
+            </div>
+            <div class="modal-actions">
+                <button class="btn-outline" @onclick="CloseNaModal">Cancel</button>
+                <button class="btn-primary" @onclick="SubmitNa">Mark N/A</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_showRejectModelModal)
+{
+    <div class="modal-overlay" @onclick="CloseRejectModelModal">
+        <div class="modal-card" @onclick:stopPropagation="true">
+            <div class="modal-header">Reject Model: @_detail?.Model.ModelNumber</div>
+            <div class="modal-body">
+                <div class="field-group">
+                    <label class="field-label">Rejection reason (required)</label>
+                    <textarea class="field-input" @bind="_rejectModelNotes"></textarea>
+                </div>
+                @if (!string.IsNullOrEmpty(_rejectModelFormError))
+                {
+                    <p class="login-error">@_rejectModelFormError</p>
+                }
+            </div>
+            <div class="modal-actions">
+                <button class="btn-outline" @onclick="CloseRejectModelModal">Cancel</button>
+                <button class="btn-danger" @onclick="SubmitRejectModel">Reject Model</button>
+            </div>
+        </div>
+    </div>
+}
 
 @code {
     private List<string>?     _manufacturers;
@@ -202,10 +450,28 @@
     private int?              _selectedModelId;
     private ValveDetail?      _detail;
     private bool              _loading;
+    private string            _currentUser = "";
+
+    private DimDisplay?          _rejectingDim;
+    private DimDisplay?          _naDim;
+    private string               _naReason = "";
+    private string?              _naFormError;
+    private List<DocumentFile>?  _rejectDocs;
+    private RejectFormModel      _rejectForm = new();
+    private string?              _rejectFormError;
+
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthStateTask { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
         _manufacturers = await Svc.GetManufacturersAsync();
+
+        if (AuthStateTask is not null)
+        {
+            var authState = await AuthStateTask;
+            _currentUser = authState.User.Identity?.Name ?? "";
+        }
     }
 
     private async Task SelectManufacturer(string mfr)
@@ -230,10 +496,144 @@
 
     private static string FormatNoteType(string raw) => raw.Replace("_", " ");
 
-    private async Task ToggleApproval(DimDisplay dim)
+    private static string ReviewTooltip(DimDisplay dim, string verb, bool clickable = true)
     {
-        if (dim.SpecId == 0 || _selectedModelId is null) return;
-        await Svc.SetApprovalAsync(dim.SpecId, !dim.IsApproved);
-        _detail = await Svc.GetValveDetailAsync(_selectedModelId.Value);
+        var when = dim.ReviewedAt?.ToLocalTime().ToString("MMM d, yyyy h:mm tt");
+        var tooltip = $"{verb} by {dim.ReviewedBy} on {when}";
+        return clickable ? $"{tooltip}\nClick to revert to unreviewed" : tooltip;
+    }
+
+    private static string OriginalValueText(DimDisplay dim) => dim.Status switch
+    {
+        DimStatus.Value => $"{dim.Value!.Value:0.000} {dim.Unit}",
+        DimStatus.ConfirmedNa => "N/A (confirmed)",
+        _ => "— (not published)",
+    };
+
+    private async Task ReloadDetail()
+    {
+        if (_selectedModelId is int id)
+            _detail = await Svc.GetValveDetailAsync(id);
+        if (_selectedMfr is not null)
+            _models = await Svc.GetModelsAsync(_selectedMfr);
+    }
+
+    private async Task ApproveDim(DimDisplay dim)
+    {
+        await Svc.SetReviewStatusAsync(dim.SpecId, ReviewStatus.Approved, _currentUser);
+        await ReloadDetail();
+    }
+
+    private async Task UnreviewDim(DimDisplay dim)
+    {
+        await Svc.SetReviewStatusAsync(dim.SpecId, ReviewStatus.Unreviewed, _currentUser);
+        await ReloadDetail();
+    }
+
+    private async Task ClearNaDim(DimDisplay dim)
+    {
+        await Svc.ClearNotApplicableAsync(dim.SpecId);
+        await ReloadDetail();
+    }
+
+    private void OpenNaModal(DimDisplay dim)
+    {
+        _naDim = dim;
+        _naReason = "";
+        _naFormError = null;
+    }
+
+    private void CloseNaModal() => _naDim = null;
+
+    private async Task SubmitNa()
+    {
+        if (_naDim is null) return;
+        if (string.IsNullOrWhiteSpace(_naReason))
+        {
+            _naFormError = "A reason is required so the next reviewer knows why this is N/A.";
+            return;
+        }
+
+        await Svc.MarkNotApplicableAsync(_naDim.SpecId, _currentUser, _naReason);
+        _naDim = null;
+        await ReloadDetail();
+    }
+
+    private async Task OpenRejectModal(DimDisplay dim)
+    {
+        _rejectingDim = dim;
+        _rejectForm = new RejectFormModel();
+        _rejectFormError = null;
+        _rejectDocs = _detail is not null
+            ? await Svc.GetDocumentsForManufacturerAsync(_detail.Model.ManufacturerId)
+            : null;
+    }
+
+    private void CloseRejectModal()
+    {
+        _rejectingDim = null;
+    }
+
+    private async Task SubmitReject()
+    {
+        if (_rejectingDim is null) return;
+        if (string.IsNullOrWhiteSpace(_rejectForm.Notes))
+        {
+            _rejectFormError = "Rejection notes are required.";
+            return;
+        }
+
+        await Svc.RejectWithCorrectionAsync(
+            _rejectingDim.SpecId, _currentUser, _rejectForm.Notes,
+            _rejectForm.CorrectedValue, _rejectForm.CorrectedDocumentFileId, _rejectForm.CorrectedPageNotes);
+
+        _rejectingDim = null;
+        await ReloadDetail();
+    }
+
+    public class RejectFormModel
+    {
+        public string Notes { get; set; } = "";
+        public decimal? CorrectedValue { get; set; }
+        public int? CorrectedDocumentFileId { get; set; }
+        public string? CorrectedPageNotes { get; set; }
+    }
+
+    private bool    _showRejectModelModal;
+    private string  _rejectModelNotes = "";
+    private string? _rejectModelFormError;
+
+    private void OpenRejectModelModal()
+    {
+        _rejectModelNotes = "";
+        _rejectModelFormError = null;
+        _showRejectModelModal = true;
+    }
+
+    private void CloseRejectModelModal()
+    {
+        _showRejectModelModal = false;
+    }
+
+    private async Task SubmitRejectModel()
+    {
+        if (_selectedModelId is null) return;
+        if (string.IsNullOrWhiteSpace(_rejectModelNotes))
+        {
+            _rejectModelFormError = "Rejection notes are required.";
+            return;
+        }
+
+        await Svc.SetModelRejectionAsync(_selectedModelId.Value, true, _currentUser, _rejectModelNotes);
+
+        _showRejectModelModal = false;
+        await ReloadDetail();
+    }
+
+    private async Task UnrejectModel()
+    {
+        if (_selectedModelId is null) return;
+        await Svc.SetModelRejectionAsync(_selectedModelId.Value, false, _currentUser, null);
+        await ReloadDetail();
     }
 }

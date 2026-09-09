@@ -1,0 +1,386 @@
+@page "/review"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject SpecValueService Specs
+
+<PageTitle>Review Dimensions — ValveSpecs</PageTitle>
+
+<div class="admin-panel review-panel">
+    <div class="section-header">
+        <span class="section-title">REVIEW CRITICAL DIMENSIONS</span>
+    </div>
+
+    <p class="decode-intro">
+        Each row below is one distinct engineering value and states exactly which valve
+        configuration it applies to. Approving a row approves it for every model sharing that
+        configuration — so the same fact is never reviewed twice, and it is never ambiguous which
+        valve is being signed off.
+    </p>
+
+    @if (_families is null)
+    {
+        <div class="loading-pulse">Loading…</div>
+    }
+    else
+    {
+        <div class="review-picker">
+            @* Manufacturer first, because family names are not unique across manufacturers --
+               "2700 Series" already exists as both a Farris and a Consolidated family. *@
+            <div class="review-picker-group">
+                <label class="select-label">Manufacturer</label>
+                <div class="review-chiprow">
+                    @foreach (var m in _manufacturers)
+                    {
+                        <button class="review-chip @(_manufacturerId == m.Id ? "active" : "")"
+                                @onclick="() => SelectManufacturer(m.Id)">@m.Name</button>
+                    }
+                </div>
+            </div>
+
+            @if (_manufacturerId is not null)
+            {
+                <div class="review-picker-group">
+                    <label class="select-label">Family</label>
+                    <div class="review-chiprow">
+                        @foreach (var f in _families.Where(f => f.ManufacturerId == _manufacturerId))
+                        {
+                            <button class="review-chip @(_familyId == f.Id ? "active" : "")"
+                                    @onclick="() => SelectFamily(f.Id)">@f.FamilyName</button>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (_progress is not null)
+            {
+                <div class="review-picker-group">
+                    <label class="select-label">Dimension</label>
+                    <div class="review-chiprow">
+                        @foreach (var p in _progress)
+                        {
+                            <button class="review-chip @(_dimension == p.Dimension ? "active" : "") @(p.HasValues ? "" : "review-chip-empty")"
+                                    disabled="@(!p.HasValues)"
+                                    title="@DimTitle(p)"
+                                    @onclick="() => SelectDimension(p.Dimension)">
+                                @p.Label
+                                @if (p.NaForFamily)
+                                {
+                                    <span class="review-chip-count">N/A</span>
+                                }
+                                else if (p.HasValues)
+                                {
+                                    <span class="review-chip-count">@p.Approved/@p.Total</span>
+                                }
+                                else
+                                {
+                                    <span class="review-chip-count">—</span>
+                                }
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+
+        @if (_progress is not null && _progress.Any(p => !p.HasValues))
+        {
+            <div class="decode-warn review-pending">
+                <strong>Not yet sourced</strong>
+                @string.Join(", ", _progress.Where(p => !p.HasValues).Select(p => p.Label))
+                <span class="decode-warn-hint">
+                    These dimensions are tracked for this family but have no values loaded yet —
+                    their source or meaning is still being confirmed with the manufacturer.
+                </span>
+            </div>
+        }
+
+        @if (_rows is not null && _dimension is not null)
+        {
+            var prog = _progress!.First(p => p.Dimension == _dimension);
+
+            <div class="review-summary">
+                <span class="review-summary-dim">@prog.Label</span>
+                <span class="review-summary-det">determined by <code>@prog.Determinants</code></span>
+                <span class="review-summary-counts">
+                    <span class="rs-approved">@prog.Approved approved</span>
+                    <span class="rs-rejected">@prog.Rejected rejected</span>
+                    <span class="rs-open">@prog.Unreviewed open</span>
+                    @if (prog.Na > 0) { <span class="rs-na">@prog.Na N/A</span> }
+                </span>
+            </div>
+
+            <table class="user-table review-table">
+                <thead>
+                    <tr>
+                        <th>Applies to</th>
+                        <th>Value</th>
+                        <th>Covers</th>
+                        <th>Source</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in _rows)
+                    {
+                        var v = row.Value;
+                        <tr class="@(v.ReviewStatus == ReviewStatus.Rejected ? "dim-rejected" : "")">
+                            <td><code class="decode-code">@Pretty(v.DeterminantSignature)</code></td>
+                            <td>
+                                @if (v.ConfirmedNa)
+                                {
+                                    @* A statement beats "N/A": a technician needs to know the disc
+                                       is replaced, not that the field is empty. *@
+                                    @if (!string.IsNullOrWhiteSpace(v.NaStatement))
+                                    {
+                                        <span class="dim-na-statement">@v.NaStatement</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="dim-na">N/A</span>
+                                    }
+                                }
+                                else if (v.Value is not null)
+                                {
+                                    <span class="review-value">@v.Value.Value.ToString("0.000")</span>
+                                    <span class="dim-unit">@v.Unit</span>
+                                }
+                                else
+                                {
+                                    <span class="dim-na dim-nospec">—</span>
+                                }
+                                @if (v.CorrectedValue is not null)
+                                {
+                                    <span class="review-corrected">→ @v.CorrectedValue.Value.ToString("0.000")</span>
+                                }
+                            </td>
+                            <td>
+                                @if (row.CoveredModels > 0)
+                                {
+                                    <span class="review-covers">@row.CoveredModels model@(row.CoveredModels == 1 ? "" : "s")</span>
+                                }
+                                else
+                                {
+                                    <span class="decode-muted">none known</span>
+                                }
+                            </td>
+                            <td class="review-source">@(row.SourceDocTitle ?? v.Source)</td>
+                            <td>
+                                @if (v.ConfirmedNa)
+                                {
+                                    <span class="role-badge role-viewer">CONFIRMED N/A</span>
+                                }
+                                else if (v.ReviewStatus == ReviewStatus.Approved)
+                                {
+                                    <span class="role-badge role-approver" title="@ReviewTip(v)">APPROVED</span>
+                                }
+                                else if (v.ReviewStatus == ReviewStatus.Rejected)
+                                {
+                                    <span class="role-badge role-admin" title="@ReviewTip(v)">REJECTED</span>
+                                }
+                                else
+                                {
+                                    <span class="decode-muted">unreviewed</span>
+                                }
+
+                                @* An unreviewed row that still carries review notes is one the
+                                   migration deliberately declined to decide — the note says why.
+                                   Leaving that in a hover tooltip made it look like an unexplained
+                                   gap next to its approved neighbours. *@
+                                @if (v.ReviewStatus == ReviewStatus.Unreviewed && !v.ConfirmedNa
+                                     && !string.IsNullOrWhiteSpace(v.ReviewNotes))
+                                {
+                                    <details class="review-flag">
+                                        <summary>needs attention</summary>
+                                        <div class="review-flag-body">@v.ReviewNotes</div>
+                                    </details>
+                                }
+                            </td>
+                            <td>
+                                <div class="user-actions-inner">
+                                    <AuthorizeView Roles="Approver,Admin" Context="rc">
+                                        <Authorized>
+                                            @if (v.ConfirmedNa)
+                                            {
+                                                <span class="decode-muted">family-wide</span>
+                                            }
+                                            else if (v.ReviewStatus == ReviewStatus.Unreviewed)
+                                            {
+                                                <button class="dim-approve-btn" @onclick="() => Approve(v.Id)">Approve</button>
+                                                <button class="dim-reject-btn" @onclick="() => OpenReject(row)">Reject</button>
+                                            }
+                                            else
+                                            {
+                                                <button class="dim-na-btn" @onclick="() => Unreview(v.Id)">Undo</button>
+                                            }
+                                        </Authorized>
+                                    </AuthorizeView>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    }
+</div>
+
+@if (_rejecting is not null)
+{
+    <div class="modal-overlay" @onclick="CloseReject">
+        <div class="modal-card" @onclick:stopPropagation="true">
+            <div class="modal-header">Reject: @Pretty(_rejecting.Value.DeterminantSignature)</div>
+            <div class="modal-body">
+                <p>
+                    This rejection applies to every model with this configuration
+                    (@_rejecting.CoveredModels known).
+                </p>
+                <div class="field-group">
+                    <label class="field-label">Reason (required)</label>
+                    <textarea class="field-input" @bind="_rejectNotes"></textarea>
+                </div>
+                <div class="field-group">
+                    <label class="field-label">Corrected value (optional)</label>
+                    <input class="field-input" @bind="_rejectCorrected" placeholder="e.g. 1.117" />
+                </div>
+                @if (!string.IsNullOrEmpty(_rejectError))
+                {
+                    <p class="login-error">@_rejectError</p>
+                }
+            </div>
+            <div class="modal-actions">
+                <button class="btn-outline" @onclick="CloseReject">Cancel</button>
+                <button class="btn-danger" @onclick="SubmitReject">Reject</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<ModelFamily>? _families;
+    private List<Manufacturer> _manufacturers = [];
+    private List<DimensionProgress>? _progress;
+    private List<SpecValueRow>? _rows;
+    private int? _manufacturerId;
+    private int? _familyId;
+    private string? _dimension;
+    private string _currentUser = "";
+
+    private SpecValueRow? _rejecting;
+    private string _rejectNotes = "";
+    private string _rejectCorrected = "";
+    private string? _rejectError;
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthStateTask { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _families = await Specs.GetFamiliesWithSpecValuesAsync();
+        _manufacturers = _families
+            .Where(f => f.Manufacturer is not null)
+            .GroupBy(f => f.ManufacturerId)
+            .Select(g => g.First().Manufacturer!)
+            .OrderBy(m => m.Name)
+            .ToList();
+
+        if (AuthStateTask is not null)
+            _currentUser = (await AuthStateTask).User.Identity?.Name ?? "";
+
+        // Skip the extra click while there is only one of a thing to choose.
+        if (_manufacturers.Count == 1) await SelectManufacturer(_manufacturers[0].Id);
+    }
+
+    private async Task SelectManufacturer(int manufacturerId)
+    {
+        _manufacturerId = manufacturerId;
+        _familyId = null;
+        _dimension = null;
+        _progress = null;
+        _rows = null;
+
+        var mine = _families!.Where(f => f.ManufacturerId == manufacturerId).ToList();
+        if (mine.Count == 1) await SelectFamily(mine[0].Id);
+    }
+
+    private static string Pretty(string signature) =>
+        signature == "(all)" ? "all models" : signature.Replace("|", " · ").Replace("=", " ");
+
+    private static string DimTitle(DimensionProgress p) =>
+        p.NaForFamily ? "Permanently not applicable for this family"
+        : p.HasValues ? $"Determined by {p.Determinants} — {p.Total} distinct values"
+        : "No values loaded yet (source or meaning pending confirmation)";
+
+    private static string ReviewTip(SpecValue v) =>
+        $"{v.ReviewStatus} by {v.ReviewedBy} on {v.ReviewedAt?.ToLocalTime():MMM d, yyyy h:mm tt}"
+        + (string.IsNullOrWhiteSpace(v.ReviewNotes) ? "" : $"\n{v.ReviewNotes}");
+
+    private async Task SelectFamily(int familyId)
+    {
+        _familyId = familyId;
+        _dimension = null;
+        _rows = null;
+        _progress = await Specs.GetProgressAsync(familyId);
+        var first = _progress.FirstOrDefault(p => p.HasValues && !p.NaForFamily);
+        if (first is not null) await SelectDimension(first.Dimension);
+    }
+
+    private async Task SelectDimension(string dimension)
+    {
+        _dimension = dimension;
+        _rows = await Specs.GetRowsAsync(_familyId!.Value, dimension);
+    }
+
+    private async Task Reload()
+    {
+        if (_familyId is null) return;
+        _progress = await Specs.GetProgressAsync(_familyId.Value);
+        if (_dimension is not null) _rows = await Specs.GetRowsAsync(_familyId.Value, _dimension);
+    }
+
+    private async Task Approve(int id)
+    {
+        await Specs.SetReviewStatusAsync(id, ReviewStatus.Approved, _currentUser);
+        await Reload();
+    }
+
+    private async Task Unreview(int id)
+    {
+        await Specs.SetReviewStatusAsync(id, ReviewStatus.Unreviewed, _currentUser);
+        await Reload();
+    }
+
+    private void OpenReject(SpecValueRow row)
+    {
+        _rejecting = row;
+        _rejectNotes = "";
+        _rejectCorrected = "";
+        _rejectError = null;
+    }
+
+    private void CloseReject() => _rejecting = null;
+
+    private async Task SubmitReject()
+    {
+        if (_rejecting is null) return;
+        if (string.IsNullOrWhiteSpace(_rejectNotes))
+        {
+            _rejectError = "A reason is required.";
+            return;
+        }
+
+        decimal? corrected = null;
+        if (!string.IsNullOrWhiteSpace(_rejectCorrected))
+        {
+            if (!decimal.TryParse(_rejectCorrected, out var parsed))
+            {
+                _rejectError = $"'{_rejectCorrected}' isn't a number.";
+                return;
+            }
+            corrected = parsed;
+        }
+
+        await Specs.RejectAsync(_rejecting.Value.Id, _currentUser, _rejectNotes, corrected);
+        _rejecting = null;
+        await Reload();
+    }
+}

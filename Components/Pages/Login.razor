@@ -1,0 +1,78 @@
+@page "/login"
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@inject UserService Users
+@inject NavigationManager Nav
+
+<PageTitle>Sign In — ValveSpecs</PageTitle>
+
+<div class="login-shell">
+    <div class="login-card">
+        <div class="login-brand">
+            <span class="brand-icon">◈</span>
+            <span class="brand-title">VALVESPECS</span>
+        </div>
+
+        <EditForm Model="_model" FormName="login" OnValidSubmit="HandleLogin" method="post">
+            <DataAnnotationsValidator />
+
+            <div class="field-group">
+                <label class="field-label">Username</label>
+                <InputText class="field-input" @bind-Value="_model.Username" />
+            </div>
+
+            <div class="field-group">
+                <label class="field-label">Password</label>
+                <InputText class="field-input" type="password" @bind-Value="_model.Password" />
+            </div>
+
+            @if (_error)
+            {
+                <p class="login-error">Invalid username or password.</p>
+            }
+
+            <button type="submit" class="btn-primary login-submit">Sign In</button>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromForm]
+    private LoginModel _model { get; set; } = new();
+
+    private bool _error;
+
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private async Task HandleLogin()
+    {
+        var user = await Users.ValidateLoginAsync(_model.Username, _model.Password);
+        if (user is null)
+        {
+            _error = true;
+            return;
+        }
+
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.Name, user.Username),
+            new(ClaimTypes.Role, user.Role),
+            new("DisplayName", user.DisplayName),
+        };
+        var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        await HttpContext!.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
+
+        Nav.NavigateTo("/", forceLoad: true);
+    }
+
+    public class LoginModel
+    {
+        [System.ComponentModel.DataAnnotations.Required]
+        public string Username { get; set; } = "";
+
+        [System.ComponentModel.DataAnnotations.Required]
+        public string Password { get; set; } = "";
+    }
+}

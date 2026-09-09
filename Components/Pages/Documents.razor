@@ -1,0 +1,162 @@
+@page "/documents"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject DocumentService Docs
+
+<PageTitle>Documents — ValveSpecs</PageTitle>
+
+<div class="admin-panel">
+    <div class="section-header">
+        <span class="section-title">DOCUMENTS</span>
+    </div>
+
+    @if (_documents is null)
+    {
+        <div class="loading-pulse">Loading…</div>
+    }
+    else
+    {
+        <table class="user-table">
+            <thead>
+                <tr>
+                    <th>Manufacturer</th>
+                    <th>Title</th>
+                    <th>Doc Number</th>
+                    <th>Revision</th>
+                    <th>Type</th>
+                    <th>Uploaded</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var doc in _documents)
+                {
+                    <tr>
+                        <td>@doc.Manufacturer?.Name</td>
+                        <td>@doc.Title</td>
+                        <td>@doc.DocumentNumber</td>
+                        <td>@doc.Revision</td>
+                        <td>@doc.DocumentType?.TypeName</td>
+                        <td>
+                            @if (doc.FileData is not null)
+                            {
+                                <span class="role-badge role-approver">UPLOADED</span>
+                            }
+                            else
+                            {
+                                <span class="role-badge role-viewer">NOT UPLOADED</span>
+                            }
+                        </td>
+                        <td>
+                            <div class="user-actions-inner">
+                                @if (doc.FileData is not null)
+                                {
+                                    <a class="doc-download" href="/documents/@doc.Id/download">Download</a>
+                                    <AuthorizeView Roles="Approver,Admin">
+                                        <Authorized>
+                                            <button class="dim-reject-link" @onclick="() => OpenDeleteModal(doc)">Delete</button>
+                                        </Authorized>
+                                    </AuthorizeView>
+                                }
+                                else
+                                {
+                                    <AuthorizeView Roles="Approver,Admin">
+                                        <Authorized>
+                                            <InputFile OnChange="e => OnFileSelected(e, doc.Id)" />
+                                            @if (_uploadingId == doc.Id)
+                                            {
+                                                <span class="loading-pulse">Uploading…</span>
+                                            }
+                                        </Authorized>
+                                    </AuthorizeView>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <p class="login-error">@_error</p>
+    }
+</div>
+
+@if (_deletingDoc is not null)
+{
+    <div class="modal-overlay" @onclick="CloseDeleteModal">
+        <div class="modal-card" @onclick:stopPropagation="true">
+            <div class="modal-header">Delete File: @_deletingDoc.Title</div>
+            <div class="modal-body">
+                <p>This removes the uploaded PDF only — the document record (title, revision, manufacturer, etc.) stays and can have a new file uploaded to it afterward.</p>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-outline" @onclick="CloseDeleteModal">Cancel</button>
+                <button class="btn-danger" @onclick="ConfirmDelete">Delete File</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<DocumentFile>? _documents;
+    private int? _uploadingId;
+    private string? _error;
+    private string _currentUser = "";
+    private DocumentFile? _deletingDoc;
+
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthStateTask { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _documents = await Docs.GetAllDocumentsAsync();
+
+        if (AuthStateTask is not null)
+        {
+            var authState = await AuthStateTask;
+            _currentUser = authState.User.Identity?.Name ?? "";
+        }
+    }
+
+    private async Task OnFileSelected(InputFileChangeEventArgs e, int documentId)
+    {
+        _error = null;
+        _uploadingId = documentId;
+        StateHasChanged();
+
+        try
+        {
+            const long maxSize = 50 * 1024 * 1024; // 50 MB
+            using var stream = e.File.OpenReadStream(maxAllowedSize: maxSize);
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+
+            await Docs.UploadFileAsync(documentId, e.File.Name, e.File.ContentType, memory.ToArray(), _currentUser);
+            _documents = await Docs.GetAllDocumentsAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Upload failed: {ex.Message}";
+        }
+        finally
+        {
+            _uploadingId = null;
+        }
+    }
+
+    private void OpenDeleteModal(DocumentFile doc) => _deletingDoc = doc;
+
+    private void CloseDeleteModal() => _deletingDoc = null;
+
+    private async Task ConfirmDelete()
+    {
+        if (_deletingDoc is null) return;
+
+        await Docs.DeleteFileAsync(_deletingDoc.Id);
+        _documents = await Docs.GetAllDocumentsAsync();
+        _deletingDoc = null;
+    }
+}

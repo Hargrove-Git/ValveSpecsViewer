@@ -1,0 +1,432 @@
+@page "/build"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject GrammarService Grammar
+@inject ResolverService Resolver
+
+<PageTitle>Build Model Number — ValveSpecs</PageTitle>
+
+<div class="admin-panel">
+    <div class="section-header">
+        <span class="section-title">BUILD MODEL NUMBER</span>
+    </div>
+
+    <p class="decode-intro">
+        Choose a family to see its configuration code, then pick a code for each segment. The model
+        number assembles as you go and its critical dimensions resolve live. Only codes the
+        manufacturer's catalog actually lists are offered, so anything built here is a valid number.
+    </p>
+
+    @if (_families is null)
+    {
+        <div class="loading-pulse">Loading families…</div>
+    }
+    else if (_manufacturers.Count == 0)
+    {
+        @* Never render a picker with nothing in it. An empty manufacturer row is exactly what a
+           missing Manufacturer navigation looks like from the outside, and it is indistinguishable
+           from "no data" unless it says so. *@
+        <div class="decode-warn">
+            <strong>Nothing available to build.</strong>
+            <span class="decode-warn-hint">
+                @if (_families!.Count == 0)
+                {
+                    @:No family has a configuration code loaded yet, so there is no template to offer.
+                }
+                else
+                {
+                    @:@_families.Count families have a configuration code, but none has a manufacturer
+                    @:attached — which points at the data rather than at this page.
+                }
+            </span>
+        </div>
+    }
+    else
+    {
+        @* Manufacturer first: family names are not unique across manufacturers -- "2700 Series"
+           already exists as both a Farris and a Consolidated family. *@
+        <div class="review-picker-group">
+            <label class="select-label">Manufacturer</label>
+            <div class="build-family-row">
+                @foreach (var m in _manufacturers)
+                {
+                    <button class="decode-sample @(m.Id == _manufacturerId ? "build-family-on" : "")"
+                            @onclick="() => SelectManufacturer(m.Id)">@m.Name</button>
+                }
+            </div>
+        </div>
+
+        @if (_manufacturerId is not null)
+        {
+            <div class="review-picker-group">
+                <label class="select-label">Family</label>
+                <div class="build-family-row">
+                    @foreach (var f in _families.Where(f => f.ManufacturerId == _manufacturerId))
+                    {
+                        <button class="decode-sample @(f.Id == _familyId ? "build-family-on" : "")"
+                                @onclick="() => SelectFamily(f.Id)">@f.FamilyName</button>
+                    }
+                </div>
+            </div>
+        }
+    }
+
+    @if (_version is not null)
+    {
+        <div class="resolve-header">
+            <span class="resolve-title">CONFIGURATION CODE — @_version.VersionLabel</span>
+            <span class="resolve-counts">
+                <span class="resolve-count">@_segments.Count segments</span>
+                <span class="resolve-count">@_segments.Count(s => s.IsRequired) required</span>
+            </span>
+        </div>
+
+        <div class="build-assembled">
+            @if (string.IsNullOrEmpty(_assembled))
+            {
+                <span class="decode-muted">pick a code below to begin</span>
+            }
+            else
+            {
+                <code class="build-number">@_assembled</code>
+            }
+            @if (_missingRequired.Count > 0)
+            {
+                <span class="build-incomplete">
+                    still required: @string.Join(", ", _missingRequired)
+                </span>
+            }
+        </div>
+
+        <table class="user-table decode-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Segment</th>
+                    <th>Code</th>
+                    <th>Meaning</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var seg in _segments)
+                {
+                    var chosen = _codes.GetValueOrDefault(seg.SegmentKey);
+                    @* A segment that does not exist on the branch chosen so far. The 1700's welded
+                       inlet has no flange facing, so offering one is how an impossible number gets
+                       built. Shown greyed with the reason rather than hidden, because a segment
+                       silently vanishing from the template is its own kind of confusing. *@
+                    var applies = _version is null || GrammarService.AppliesGiven(_version, seg, _codes);
+                    <tr class="@(!applies ? "build-row-off"
+                                 : seg.IsRequired && string.IsNullOrEmpty(chosen) ? "decode-row-missing" : "")">
+                        <td>@seg.Position</td>
+                        <td>
+                            <strong>@seg.Label</strong>
+                            @if (seg.DashBefore)
+                            {
+                                <span class="build-dash" title="This segment starts a new dash-delimited token">–</span>
+                            }
+                        </td>
+                        <td>
+                            @if (!applies)
+                            {
+                                <span class="decode-muted">@BranchReason(seg)</span>
+                            }
+                            else if (seg.IsFreeForm)
+                            {
+                                @* No list to choose from: this axis is assigned by the customer, so
+                                   the catalog publishes no codes for it. Validated against the
+                                   segment's stored pattern as it is typed. *@
+                                <input class="field-input build-select" value="@chosen"
+                                       placeholder="@seg.PatternDescription"
+                                       @oninput="e => SetCode(seg.SegmentKey, e.Value?.ToString())" />
+                            }
+                            else if (seg.Values.Count == 0)
+                            {
+                                <span class="decode-muted">no codes recorded</span>
+                            }
+                            else
+                            {
+                                <select class="field-input build-select" value="@chosen"
+                                        @onchange="e => SetCode(seg.SegmentKey, e.Value?.ToString())">
+                                    <option value="">@(seg.IsRequired ? "— choose —" : "— none —")</option>
+                                    @foreach (var v in seg.Values.OrderBy(v => v.Code, StringComparer.OrdinalIgnoreCase))
+                                    {
+                                        <option value="@v.Code" selected="@(v.Code == chosen)">@v.Code</option>
+                                    }
+                                </select>
+                            }
+                        </td>
+                        <td>
+                            @{
+                                var desc = seg.Values.FirstOrDefault(v => v.Code == chosen)?.Description
+                                           ?? (seg.IsFreeForm ? seg.PatternDescription : null);
+                                var badShape = applies && seg.IsFreeForm && !string.IsNullOrEmpty(chosen)
+                                            && !GrammarService.FitsPattern(seg, chosen);
+                            }
+                            @if (!applies)
+                            {
+                                <span class="decode-muted">—</span>
+                            }
+                            else if (badShape)
+                            {
+                                @* Say so here rather than letting Assemble emit a number that will
+                                   not decode. A model number that does not parse back is worse than
+                                   no model number. *@
+                                <span class="build-invalid">not a valid @seg.Label.ToLowerInvariant()</span>
+                            }
+                            else if (!string.IsNullOrWhiteSpace(desc))
+                            {
+                                <span class="decode-muted">@desc</span>
+                            }
+                            else if (!string.IsNullOrEmpty(chosen))
+                            {
+                                <span class="decode-muted">—</span>
+                            }
+                        </td>
+                        <td>
+                            @if (seg.IsRequired)
+                            {
+                                <span class="role-badge role-viewer">REQUIRED</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        @if (_resolved is { Dimensions.Count: 0 })
+        {
+            <div class="decode-warn">
+                <strong>This family has a configuration code but no dimensions yet.</strong>
+                <span class="decode-warn-hint">
+                    The number above is valid and decodes correctly, but no critical dimensions have
+                    been defined for @(_version?.Family?.FamilyName ?? "this family"), so there is nothing to resolve.
+                    The template is still useful on its own.
+                </span>
+            </div>
+        }
+        else if (_resolved is not null)
+        {
+            <div class="resolve-header">
+                <span class="resolve-title">CRITICAL DIMENSIONS</span>
+                <span class="resolve-counts">
+                    @if (_resolved.ApprovedCount > 0)
+                    {
+                        <span class="resolve-count resolve-count-ok">@_resolved.ApprovedCount approved</span>
+                    }
+                    @if (_resolved.Answered - _resolved.ApprovedCount > 0)
+                    {
+                        <span class="resolve-count">@(_resolved.Answered - _resolved.ApprovedCount) not yet approved</span>
+                    }
+                    @if (_resolved.Indeterminate > 0)
+                    {
+                        <span class="resolve-count resolve-count-warn">@_resolved.Indeterminate cannot be determined</span>
+                    }
+                    @if (_resolved.NotApplicable > 0)
+                    {
+                        <span class="resolve-count">@_resolved.NotApplicable N/A</span>
+                    }
+                    @if (_resolved.Unseeded > 0)
+                    {
+                        <span class="resolve-count">@_resolved.Unseeded not loaded</span>
+                    }
+                </span>
+            </div>
+
+            <table class="user-table decode-table">
+                <thead>
+                    <tr><th>Dimension</th><th>Value</th><th>Status</th><th>Applies to</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var d in _resolved.Dimensions)
+                    {
+                        <tr class="@(d.State == ResolveState.Indeterminate ? "decode-row-missing" : "")">
+                            <td><strong>@d.Label</strong></td>
+                            <td>
+                                @if (d.HasNumber)
+                                {
+                                    <span class="dim-value">@d.Number?.ToString("0.####") @d.Value?.Unit</span>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(d.Value?.NaStatement))
+                                {
+                                    <span class="dim-na-statement">@d.Value!.NaStatement</span>
+                                }
+                                else
+                                {
+                                    <span class="dim-na dim-nospec">—</span>
+                                }
+                            </td>
+                            <td>
+                                @switch (d.State)
+                                {
+                                    case ResolveState.Approved:
+                                        <span class="dim-approved-badge dim-badge-static">✓ Approved</span>
+                                        break;
+                                    case ResolveState.Unreviewed:
+                                        <span class="role-badge role-viewer">UNREVIEWED</span>
+                                        break;
+                                    case ResolveState.Rejected:
+                                        <span class="role-badge role-approver">REJECTED</span>
+                                        break;
+                                    case ResolveState.NotApplicable:
+                                        <span class="dim-na">N/A</span>
+                                        break;
+                                    case ResolveState.NaForFamily:
+                                        <span class="dim-na">N/A for this family</span>
+                                        break;
+                                    case ResolveState.NoValue:
+                                        <span class="decode-muted">not loaded yet</span>
+                                        break;
+                                    case ResolveState.Indeterminate:
+                                        <span class="resolve-indet">Cannot determine</span>
+                                        break;
+                                }
+                            </td>
+                            <td>
+                                @if (d.State == ResolveState.Indeterminate)
+                                {
+                                    <span class="resolve-needs">needs @string.Join(" or ", d.Needs)</span>
+                                }
+                                else if (d.Signature is not null)
+                                {
+                                    <code class="decode-code">@d.Signature.Replace("|", " · ")</code>
+                                }
+                                else
+                                {
+                                    <span class="decode-muted">—</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    }
+    else if (_familyId is not null)
+    {
+        <div class="decode-warn">
+            <strong>No configuration code for this family yet.</strong>
+            <span class="decode-warn-hint">
+                Its model-number breakdown hasn't been captured, so there is no template to build
+                from. Its dimensions are still on the legacy per-model layer.
+            </span>
+        </div>
+    }
+</div>
+
+@code {
+    private List<ModelFamily>? _families;
+    private List<Manufacturer> _manufacturers = [];
+    private int? _manufacturerId;
+    private int? _familyId;
+    private GrammarVersion? _version;
+    private List<SegmentDefinition> _segments = [];
+    private readonly Dictionary<string, string> _codes = new(StringComparer.OrdinalIgnoreCase);
+    private string _assembled = "";
+    private List<string> _missingRequired = [];
+    private ResolveResult? _resolved;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _families = await Grammar.GetBuildableFamiliesAsync();
+
+        _manufacturers = _families
+            .Where(f => f.Manufacturer is not null)
+            .GroupBy(f => f.ManufacturerId)
+            .Select(g => g.First().Manufacturer!)
+            .OrderBy(m => m.Name)
+            .ToList();
+
+        if (_manufacturers.Count == 1) await SelectManufacturer(_manufacturers[0].Id);
+    }
+
+    private async Task SelectManufacturer(int manufacturerId)
+    {
+        _manufacturerId = manufacturerId;
+        _familyId = null;
+        _version = null;
+        _segments = [];
+        _codes.Clear();
+        _assembled = "";
+        _resolved = null;
+
+        var mine = _families!.Where(f => f.ManufacturerId == manufacturerId).ToList();
+        if (mine.Count == 1) await SelectFamily(mine[0].Id);
+    }
+
+    private async Task SelectFamily(int familyId)
+    {
+        _familyId = familyId;
+        _codes.Clear();
+        _assembled = "";
+        _resolved = null;
+
+        // Newest current grammar for the family — the one a valve being built today would use.
+        _version = (await Grammar.GetVersionsAsync(familyId)).FirstOrDefault();
+        _segments = _version?.Segments.OrderBy(s => s.Position).ToList() ?? [];
+        Recompute();
+    }
+
+    private async Task SetCode(string segmentKey, string? code)
+    {
+        if (string.IsNullOrWhiteSpace(code)) _codes.Remove(segmentKey);
+        else _codes[segmentKey] = code;
+
+        Recompute();
+        await ResolveAsync();
+    }
+
+    /// Why a segment is unavailable, in the reviewer's own vocabulary rather than a schema dump.
+    private string BranchReason(SegmentDefinition seg)
+    {
+        var c = seg.Conditions.FirstOrDefault();
+        if (c is null || _version is null) return "not on this branch";
+
+        var src = _version.Segments.FirstOrDefault(s =>
+            string.Equals(s.SegmentKey, c.SourceSegmentKey, StringComparison.OrdinalIgnoreCase));
+        var label = src?.Label ?? c.SourceSegmentKey;
+        var value = src?.Values.FirstOrDefault(v => v.Code == c.MatchValue)?.Description ?? c.MatchValue;
+
+        return $"only when {label} is {value}";
+    }
+
+    private void Recompute()
+    {
+        // Choosing an inlet type can retire a choice made earlier -- pick W after picking a flange
+        // facing and the facing no longer exists. Dropping it here rather than leaving it set is what
+        // keeps the assembled number honest; leaving it would emit a number the decoder rejects.
+        var retired = _codes.Keys
+            .Where(k => _segments.FirstOrDefault(s => s.SegmentKey == k) is { } seg
+                        && _version is not null
+                        && !GrammarService.AppliesGiven(_version, seg, _codes))
+            .ToList();
+        foreach (var k in retired) _codes.Remove(k);
+
+        // A free-form value that does not fit its pattern is dropped before assembling rather than
+        // emitted, for the same reason.
+        var usable = _codes
+            .Where(kv => _segments.FirstOrDefault(s => s.SegmentKey == kv.Key) is not { IsFreeForm: true } seg
+                         || GrammarService.FitsPattern(seg, kv.Value))
+            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+
+        _assembled = _version is null ? "" : GrammarService.Assemble(_version, usable);
+
+        // Only segments that actually apply can be "missing": a flange rating is not missing from a
+        // welded valve.
+        _missingRequired = _segments
+            .Where(s => s.IsRequired && !usable.ContainsKey(s.SegmentKey)
+                        && (_version is null || GrammarService.AppliesGiven(_version, s, _codes)))
+            .Select(s => s.Label)
+            .ToList();
+    }
+
+    private async Task ResolveAsync()
+    {
+        // Resolving reuses the same path a typed number takes, so the builder cannot drift from
+        // the lookup screen: assemble a string, hand it to the resolver.
+        _resolved = string.IsNullOrWhiteSpace(_assembled)
+            ? null
+            : await Resolver.ResolveAsync(_assembled);
+    }
+}

@@ -22,6 +22,13 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
+    text-decoration: none;
+    transition: opacity 0.15s;
+}
+
+.header-brand:hover {
+    opacity: 0.85;
+    text-decoration: none;
 }
 
 .brand-icon {
@@ -54,15 +61,128 @@
     line-height: 1.4;
 }
 
-.header-badge {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.65rem;
-    letter-spacing: 0.1em;
-    color: var(--accent);
-    border: 1px solid var(--accent);
-    padding: 0.2rem 0.5rem;
+.header-meta {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+/* ── Nav menu / user menu (details/summary dropdowns) ────────── */
+.nav-menu, .user-menu {
+    position: relative;
+}
+
+.nav-menu > summary, .user-menu > summary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    list-style: none;
+    cursor: pointer;
+    font-family: var(--font-head);
+    font-weight: 600;
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+    padding: 0.4rem 0.65rem;
+    border-radius: var(--radius);
+    border: 1px solid transparent;
+    transition: border-color 0.15s, color 0.15s;
+}
+
+.nav-menu > summary::-webkit-details-marker,
+.user-menu > summary::-webkit-details-marker {
+    display: none;
+}
+
+.nav-menu > summary::after {
+    content: '▾';
+    font-size: 0.6rem;
+    color: var(--text-muted);
+}
+
+.nav-menu[open] > summary, .user-menu[open] > summary,
+.nav-menu > summary:hover, .user-menu > summary:hover {
+    border-color: var(--border-light);
+    color: var(--text-primary);
+}
+
+.user-icon {
+    width: 1.1rem;
+    height: 1.1rem;
+    color: var(--text-muted);
+}
+
+.header-user-name {
+    font-family: var(--font-body);
+    font-weight: 400;
+    letter-spacing: normal;
+    text-transform: none;
+    color: var(--text-secondary);
+}
+
+.nav-menu-body, .user-menu-body {
+    position: absolute;
+    top: calc(100% + 0.4rem);
+    right: 0;
+    min-width: 180px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius);
+    padding: 0.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    box-shadow: 0 8px 24px rgba(0,0,0,.35);
+    z-index: 200;
+}
+
+.nav-menu-link {
+    display: block;
+    font-family: var(--font-body);
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    padding: 0.45rem 0.6rem;
+    border-radius: 3px;
+    transition: background 0.12s, color 0.12s;
+}
+
+.nav-menu-link:hover {
+    background: var(--surface-3);
+    color: var(--text-primary);
+    text-decoration: none;
+}
+
+.user-menu-body form { margin: 0; }
+.user-menu-body .header-logout { width: 100%; text-align: left; }
+
+.header-role {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    border: 1px solid var(--border-light);
+    padding: 0.1rem 0.35rem;
     border-radius: 2px;
-    opacity: 0.7;
+}
+
+.header-logout {
+    background: transparent;
+    border: 1px solid var(--border-light);
+    color: var(--text-secondary);
+    font-family: var(--font-head);
+    font-weight: 600;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    padding: 0.3rem 0.65rem;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+}
+
+.header-logout:hover {
+    border-color: var(--red);
+    color: var(--red);
 }
 
 .shell-main {

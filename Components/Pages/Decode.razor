@@ -1,0 +1,346 @@
+@page "/decode"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject GrammarService Grammar
+@inject ResolverService Resolver
+
+<PageTitle>Look Up Model Number — ValveSpecs</PageTitle>
+
+<div class="admin-panel">
+    <div class="section-header">
+        <span class="section-title">LOOK UP MODEL NUMBER</span>
+    </div>
+
+    <p class="decode-intro">
+        Enter the model number from the nameplate. It is decoded against the configuration-code
+        grammar taken from the manufacturer's catalog, then each critical dimension is resolved
+        from the approved values. Where the number doesn't say enough to determine a dimension,
+        that is stated outright rather than guessed at.
+    </p>
+
+    <div class="decode-input-row">
+        <input class="field-input decode-input" @bind="_input" @bind:event="oninput"
+               @onkeyup="OnKeyUp" placeholder="e.g. 1905-00MC-1-CC-TD-34-RF-SS-HP" />
+        <button class="btn-primary" @onclick="RunDecode" disabled="@_busy">Look Up</button>
+    </div>
+
+    <div class="decode-samples">
+        Try:
+        @foreach (var s in _samples)
+        {
+            <button class="decode-sample" @onclick="() => UseSample(s)">@s</button>
+        }
+    </div>
+
+    @if (_busy)
+    {
+        <div class="loading-pulse">Decoding…</div>
+    }
+    else if (_results is not null)
+    {
+        @if (_results.Count == 0)
+        {
+            <div class="decode-warn">
+                <strong>Not recognised</strong>
+                No loaded grammar recognises <code class="decode-bad">@_input</code>.
+                <span class="decode-warn-hint">
+                    The series prefix doesn't match any grammar we hold. Either this is a family
+                    whose catalog we haven't captured yet, or the number is malformed. Grammars
+                    are currently loaded for: 1900 / 1900 DM, and 1900/P.
+                </span>
+            </div>
+        }
+        else
+        {
+            @* The resolver disambiguates ties between equally-fitting grammars, so its choice is
+               the authoritative one — otherwise the verdict could name one series while the
+               dimensions below came from another. *@
+            var best = _resolved?.Parse ?? _results[0];
+
+            <div class="decode-verdict @(best.IsComplete ? "decode-ok" : "decode-partial")">
+                @if (best.IsComplete)
+                {
+                    <strong>Fully decoded</strong>
+                    <span>as <em>@best.FamilyName</em> — grammar @best.VersionLabel</span>
+                }
+                else
+                {
+                    <strong>Partially decoded</strong>
+                    <span>
+                        best fit is <em>@best.FamilyName</em> — grammar @best.VersionLabel
+                        (@best.MatchedCount of @best.Segments.Count segments)
+                    </span>
+                }
+            </div>
+
+            @if (best.UninterpretedTokens.Count > 0)
+            {
+                <div class="decode-warn">
+                    <strong>Could not interpret:</strong>
+                    @foreach (var t in best.UninterpretedTokens)
+                    {
+                        <code class="decode-bad">@t</code>
+                    }
+                    <span class="decode-warn-hint">
+                        Not a value in any remaining segment of this grammar. Either the number
+                        uses an older catalog edition, or this is a code we haven't captured yet.
+                    </span>
+                </div>
+            }
+
+            @if (_resolved is { AlsoMatched.Count: > 0 })
+            {
+                <div class="decode-warn">
+                    <strong>Also fits another series.</strong>
+                    <span class="decode-warn-hint">
+                        This number decodes just as well under @string.Join(", ", _resolved.AlsoMatched).
+                        Showing <em>@best.FamilyName</em> because a model with this number is registered
+                        there and it has values loaded. A fuller number would remove the ambiguity.
+                    </span>
+                </div>
+            }
+
+            @if (_resolved is not null)
+            {
+                <div class="resolve-header">
+                    <span class="resolve-title">CRITICAL DIMENSIONS</span>
+                    <span class="resolve-counts">
+                        @if (_resolved.ApprovedCount > 0)
+                        {
+                            <span class="resolve-count resolve-count-ok">@_resolved.ApprovedCount approved</span>
+                        }
+                        @if (_resolved.Answered - _resolved.ApprovedCount > 0)
+                        {
+                            <span class="resolve-count">@(_resolved.Answered - _resolved.ApprovedCount) not yet approved</span>
+                        }
+                        @if (_resolved.Indeterminate > 0)
+                        {
+                            <span class="resolve-count resolve-count-warn">@_resolved.Indeterminate cannot be determined</span>
+                        }
+                        @if (_resolved.NotApplicable > 0)
+                        {
+                            <span class="resolve-count">@_resolved.NotApplicable N/A</span>
+                        }
+                        @if (_resolved.Unseeded > 0)
+                        {
+                            <span class="resolve-count">@_resolved.Unseeded not loaded</span>
+                        }
+                    </span>
+                </div>
+
+                @if (_resolved.Indeterminate > 0)
+                {
+                    <div class="decode-warn">
+                        <strong>This model number is incomplete.</strong>
+                        <span class="decode-warn-hint">
+                            @_resolved.Indeterminate of @_resolved.Dimensions.Count dimensions cannot be
+                            determined from it. The value genuinely depends on configuration this number
+                            doesn't state — so no figure is shown rather than showing one that may be for
+                            a different valve. The full nameplate number will resolve them.
+                        </span>
+                    </div>
+                }
+
+                <table class="user-table decode-table">
+                    <thead>
+                        <tr>
+                            <th>Dimension</th>
+                            <th>Value</th>
+                            <th>Status</th>
+                            <th>Applies to</th>
+                            <th>Source</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var d in _resolved.Dimensions)
+                        {
+                            <tr class="@(d.State == ResolveState.Indeterminate ? "decode-row-missing" : "")">
+                                <td><strong>@d.Label</strong></td>
+                                <td>
+                                    @if (d.HasNumber)
+                                    {
+                                        <span class="dim-value">@d.Number?.ToString("0.####") @d.Value?.Unit</span>
+                                    }
+                                    else if (!string.IsNullOrWhiteSpace(d.Value?.NaStatement))
+                                    {
+                                        <span class="dim-na-statement">@d.Value!.NaStatement</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="dim-na dim-nospec">—</span>
+                                    }
+                                </td>
+                                <td>
+                                    @switch (d.State)
+                                    {
+                                        case ResolveState.Approved:
+                                            <span class="dim-approved-badge dim-badge-static"
+                                                  title="Approved by @d.Value?.ReviewedBy">✓ Approved</span>
+                                            break;
+                                        case ResolveState.Unreviewed:
+                                            <span class="role-badge role-viewer">UNREVIEWED</span>
+                                            break;
+                                        case ResolveState.Rejected:
+                                            <span class="role-badge role-approver" title="@d.Value?.ReviewNotes">REJECTED</span>
+                                            break;
+                                        case ResolveState.NotApplicable:
+                                            <span class="dim-na">N/A</span>
+                                            break;
+                                        case ResolveState.NaForFamily:
+                                            <span class="dim-na">N/A for this family</span>
+                                            break;
+                                        case ResolveState.NoValue:
+                                            <span class="decode-muted">not loaded yet</span>
+                                            break;
+                                        case ResolveState.Indeterminate:
+                                            <span class="resolve-indet">Cannot determine</span>
+                                            break;
+                                    }
+                                </td>
+                                <td>
+                                    @if (d.State == ResolveState.Indeterminate)
+                                    {
+                                        <span class="resolve-needs">
+                                            needs @string.Join(" or ", d.Needs)
+                                        </span>
+                                    }
+                                    else if (d.Signature is not null)
+                                    {
+                                        <code class="decode-code">@d.Signature.Replace("|", " · ")</code>
+                                    }
+                                    else
+                                    {
+                                        <span class="decode-muted">—</span>
+                                    }
+                                </td>
+                                <td>
+                                    @if (d.SourceTitle is not null)
+                                    {
+                                        <span class="decode-muted">@d.SourceTitle</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="decode-muted">—</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+
+            <div class="resolve-header">
+                <span class="resolve-title">CONFIGURATION CODE</span>
+            </div>
+
+            <table class="user-table decode-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Segment</th>
+                        <th>Code</th>
+                        <th>Meaning</th>
+                        <th>Required</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var seg in best.Segments)
+                    {
+                        <tr class="@(seg.Code is null ? "decode-row-missing" : "")">
+                            <td>@seg.Position</td>
+                            <td>@seg.Label</td>
+                            <td>
+                                @if (seg.Code is not null)
+                                {
+                                    <code class="decode-code">@seg.Code</code>
+                                }
+                                else
+                                {
+                                    <span class="dim-na dim-nospec">—</span>
+                                }
+                            </td>
+                            <td>
+                                @if (seg.Code is null)
+                                {
+                                    <span class="decode-muted">not specified</span>
+                                }
+                                else
+                                {
+                                    @(seg.Description ?? "")
+                                }
+                            </td>
+                            <td>
+                                @if (seg.IsRequired)
+                                {
+                                    <span class="role-badge role-viewer">REQUIRED</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            @if (_results.Count > 1)
+            {
+                <details class="decode-others">
+                    <summary>Other grammars tried (@(_results.Count - 1))</summary>
+                    <table class="user-table">
+                        <thead>
+                            <tr><th>Family</th><th>Grammar</th><th>Matched</th><th>Uninterpreted</th><th>Complete</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var r in _results.Skip(1))
+                            {
+                                <tr>
+                                    <td>@r.FamilyName</td>
+                                    <td>@r.VersionLabel</td>
+                                    <td>@r.MatchedCount / @r.Segments.Count</td>
+                                    <td>@(r.UninterpretedTokens.Count == 0 ? "—" : string.Join(", ", r.UninterpretedTokens))</td>
+                                    <td>@(r.IsComplete ? "yes" : "no")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </details>
+            }
+        }
+    }
+</div>
+
+@code {
+    private string _input = "";
+    private List<ParseResult>? _results;
+    private ResolveResult? _resolved;
+    private bool _busy;
+
+    private readonly string[] _samples =
+    [
+        "1905-00-N",
+        "1905-00MC-1-CC-TD-34-RF-SS-HP",
+        "1905-00-D-1DM-CC-CD-31-RF-GSDC-LP-G1",
+        "1905-00-D-P1-5-CC-31-RF-SS",
+    ];
+
+    private async Task UseSample(string s)
+    {
+        _input = s;
+        await RunDecode();
+    }
+
+    private async Task OnKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await RunDecode();
+    }
+
+    private async Task RunDecode()
+    {
+        if (string.IsNullOrWhiteSpace(_input)) { _results = null; _resolved = null; return; }
+        _busy = true;
+        try
+        {
+            _results  = await Grammar.ParseAllAsync(_input);
+            _resolved = await Resolver.ResolveAsync(_input);
+        }
+        finally { _busy = false; }
+    }
+}

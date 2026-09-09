@@ -1,0 +1,197 @@
+@page "/admin/users"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject UserService Users
+
+<PageTitle>Manage Users — ValveSpecs</PageTitle>
+
+<div class="admin-panel">
+    <div class="section-header">
+        <span class="section-title">USER MANAGEMENT</span>
+        <button class="btn-primary" @onclick="OpenAddModal">+ Add User</button>
+    </div>
+
+    @if (_users is null)
+    {
+        <div class="loading-pulse">Loading…</div>
+    }
+    else
+    {
+        <table class="user-table">
+            <thead>
+                <tr>
+                    <th>Username</th>
+                    <th>Display Name</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var u in _users)
+                {
+                    <tr>
+                        <td>@u.Username</td>
+                        <td>@u.DisplayName</td>
+                        <td><span class="role-badge role-@u.Role.ToLower()">@u.Role</span></td>
+                        <td>@(u.Active ? "Active" : "Inactive")</td>
+                        <td>
+                            <div class="user-actions-inner">
+                                <button class="btn-outline" @onclick="() => OpenEditModal(u)">Edit</button>
+                                @if (_confirmingDeleteId == u.Id)
+                                {
+                                    <button class="btn-danger" @onclick="() => ConfirmDelete(u.Id)">Confirm Delete?</button>
+                                }
+                                else
+                                {
+                                    <button class="btn-outline-danger" @onclick="() => _confirmingDeleteId = u.Id">Delete</button>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@if (_showModal)
+{
+    <div class="modal-overlay" @onclick="CloseModal">
+        <div class="modal-card" @onclick:stopPropagation="true">
+            <div class="modal-header">@(_editingId is null ? "Add User" : "Edit User")</div>
+            <div class="modal-body">
+                <div class="field-group">
+                    <label class="field-label">Username</label>
+                    <input class="field-input" @bind="_form.Username" />
+                </div>
+                <div class="field-group">
+                    <label class="field-label">Display Name</label>
+                    <input class="field-input" @bind="_form.DisplayName" />
+                </div>
+                <div class="field-group">
+                    <label class="field-label">Password @(_editingId is not null ? "(leave blank to keep current)" : "")</label>
+                    <input class="field-input" type="password" @bind="_form.Password" />
+                </div>
+                <div class="field-group">
+                    <label class="field-label">Role</label>
+                    <select class="field-input" @bind="_form.Role">
+                        @foreach (var role in Roles.All)
+                        {
+                            <option value="@role">@role</option>
+                        }
+                    </select>
+                </div>
+                @if (_editingId is not null)
+                {
+                    <div class="field-group field-checkbox">
+                        <label class="field-label">
+                            <input type="checkbox" @bind="_form.Active" /> Active
+                        </label>
+                    </div>
+                }
+                @if (!string.IsNullOrEmpty(_formError))
+                {
+                    <p class="login-error">@_formError</p>
+                }
+            </div>
+            <div class="modal-actions">
+                <button class="btn-outline" @onclick="CloseModal">Cancel</button>
+                <button class="btn-primary" @onclick="SaveUser">Save</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<User>? _users;
+    private bool _showModal;
+    private int? _editingId;
+    private int? _confirmingDeleteId;
+    private string? _formError;
+    private UserFormModel _form = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Reload();
+    }
+
+    private async Task Reload()
+    {
+        _users = await Users.GetAllUsersAsync();
+        _confirmingDeleteId = null;
+    }
+
+    private void OpenAddModal()
+    {
+        _editingId = null;
+        _form = new UserFormModel { Role = Roles.Viewer, Active = true };
+        _formError = null;
+        _showModal = true;
+    }
+
+    private void OpenEditModal(User u)
+    {
+        _editingId = u.Id;
+        _form = new UserFormModel
+        {
+            Username = u.Username,
+            DisplayName = u.DisplayName,
+            Role = u.Role,
+            Active = u.Active,
+        };
+        _formError = null;
+        _showModal = true;
+    }
+
+    private void CloseModal()
+    {
+        _showModal = false;
+    }
+
+    private async Task SaveUser()
+    {
+        if (string.IsNullOrWhiteSpace(_form.Username) || string.IsNullOrWhiteSpace(_form.DisplayName))
+        {
+            _formError = "Username and display name are required.";
+            return;
+        }
+        if (_editingId is null && string.IsNullOrWhiteSpace(_form.Password))
+        {
+            _formError = "Password is required for a new user.";
+            return;
+        }
+        if (await Users.UsernameTakenAsync(_form.Username, _editingId))
+        {
+            _formError = "That username is already taken.";
+            return;
+        }
+
+        if (_editingId is null)
+        {
+            await Users.CreateUserAsync(_form.Username, _form.Password!, _form.DisplayName, _form.Role);
+        }
+        else
+        {
+            await Users.UpdateUserAsync(_editingId.Value, _form.Username, _form.DisplayName, _form.Role, _form.Active, _form.Password);
+        }
+
+        _showModal = false;
+        await Reload();
+    }
+
+    private async Task ConfirmDelete(int id)
+    {
+        await Users.DeleteUserAsync(id);
+        await Reload();
+    }
+
+    public class UserFormModel
+    {
+        public string Username { get; set; } = "";
+        public string DisplayName { get; set; } = "";
+        public string? Password { get; set; }
+        public string Role { get; set; } = Data.Roles.Viewer;
+        public bool Active { get; set; } = true;
+    }
+}
