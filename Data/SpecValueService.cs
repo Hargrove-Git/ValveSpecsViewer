@@ -41,12 +41,15 @@ public class SpecValueService(ValveSpecsDb db, GrammarService grammar)
             .Where(sv => sv.FamilyId == familyId)
             .ToListAsync();
 
+        var labels = await GetSegmentLabelsAsync(familyId);
+
         return dims.Select(fd =>
         {
             var mine = values.Where(v => v.Dimension == fd.Dimension).ToList();
             var determinants = fd.Determinants.Count == 0
                 ? "universal"
-                : string.Join(" + ", fd.Determinants.OrderBy(d => d.Ordinal).Select(d => d.SegmentKey));
+                : string.Join(" + ", fd.Determinants.OrderBy(d => d.Ordinal)
+                    .Select(d => labels.GetValueOrDefault(d.SegmentKey, d.SegmentKey)));
 
             return new DimensionProgress(
                 fd.Dimension, DimKey.Label(fd.Dimension), fd.NaForFamily, determinants,
@@ -78,18 +81,76 @@ public class SpecValueService(ValveSpecsDb db, GrammarService grammar)
                     .ToDictionaryAsync(d => d.Id, d => d.Title);
 
         var coverage = await CountCoveredModelsAsync(familyId, dimension, values.Select(v => v.DeterminantSignature));
+        var descriptions = await GetCodeDescriptionsAsync(familyId);
 
         return values
             .Select(v => new SpecValueRow(
                 v,
                 coverage.GetValueOrDefault(v.DeterminantSignature),
-                v.SourceDocumentFileId is { } id && docTitles.TryGetValue(id, out var t) ? t : null))
+                v.SourceDocumentFileId is { } id && docTitles.TryGetValue(id, out var t) ? t : null,
+                DescribeSignature(v.DeterminantSignature, descriptions)))
             // Settled N/A rows sort last. disc_thickness has 51 of them against 34 real values,
             // and ordering purely by signature puts "cryodisc" first — burying every row that
             // needs a decision behind seventeen screens of nothing to do.
             .OrderBy(r => r.Value.ConfirmedNa)
             .ThenBy(r => r.Value.DeterminantSignature, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    /// segment_key -> catalogue label ("bellows" -> "Bellows Selection"), real and derived segments,
+    /// from the family's current grammar. The bare key "bellows" reads as a statement about the valve.
+    private async Task<Dictionary<string, string>> GetSegmentLabelsAsync(int familyId)
+    {
+        var real = await (
+            from sd in db.SegmentDefinitions
+            join gv in db.GrammarVersions on sd.GrammarVersionId equals gv.Id
+            where gv.FamilyId == familyId && gv.IsCurrent
+            select new { sd.SegmentKey, sd.Label }).ToListAsync();
+        var derived = await (
+            from ds in db.DerivedSegments
+            join gv in db.GrammarVersions on ds.GrammarVersionId equals gv.Id
+            where gv.FamilyId == familyId && gv.IsCurrent
+            select new { ds.SegmentKey, ds.Label }).ToListAsync();
+
+        // A key can sit at two positions (the 1700's flanged and welded tails); either label will do.
+        return real.Concat(derived)
+            .Where(s => !string.IsNullOrWhiteSpace(s.Label))
+            .GroupBy(s => s.SegmentKey)
+            .ToDictionary(g => g.Key, g => g.First().Label);
+    }
+
+    /// "segment_key=code" -> description, for every described code in the family's current grammar.
+    private async Task<Dictionary<string, string>> GetCodeDescriptionsAsync(int familyId)
+    {
+        var codes = await (
+            from sv in db.SegmentValues
+            join sd in db.SegmentDefinitions on sv.SegmentDefinitionId equals sd.Id
+            join gv in db.GrammarVersions on sd.GrammarVersionId equals gv.Id
+            where gv.FamilyId == familyId && gv.IsCurrent && sv.Description != null
+            select new { sd.SegmentKey, sv.Code, sv.Description }).ToListAsync();
+
+        // A key repeated across positions (the 1700 has two flanged/welded tails) can list the same
+        // code twice; the first description is as good as the other.
+        return codes
+            .GroupBy(c => $"{c.SegmentKey}={c.Code}")
+            .ToDictionary(g => g.Key, g => g.First().Description!);
+    }
+
+    /// "00 Non-Bellows · D orifice - 0.110 sq in …" for the parts of a signature whose codes are
+    /// described; null when none are. Derived segments (disc_type etc.) already hold words, not codes.
+    private static string? DescribeSignature(string signature, Dictionary<string, string> descriptions)
+    {
+        var parts = signature.Split('|')
+            .Select(p =>
+            {
+                if (!descriptions.TryGetValue(p, out var d)) return null;
+                var code = p[(p.IndexOf('=') + 1)..];
+                // Orifice descriptions already open with the code ("D orifice - ..."); don't repeat it.
+                return d.StartsWith(code + " ", StringComparison.Ordinal) ? d : $"{code} {d}";
+            })
+            .Where(p => p is not null)
+            .ToList();
+        return parts.Count == 0 ? null : string.Join(" · ", parts);
     }
 
     /// Signature -> number of models in the family whose decoded segments match it.

@@ -125,7 +125,13 @@
                     {
                         var v = row.Value;
                         <tr class="@(v.ReviewStatus == ReviewStatus.Rejected ? "dim-rejected" : "")">
-                            <td><code class="decode-code">@Pretty(v.DeterminantSignature)</code></td>
+                            <td>
+                                <code class="decode-code">@Pretty(v.DeterminantSignature)</code>
+                                @if (row.CodeMeanings is not null)
+                                {
+                                    <div class="review-code-meaning" title="@row.CodeMeanings">@row.CodeMeanings</div>
+                                }
+                            </td>
                             <td>
                                 @if (v.ConfirmedNa)
                                 {
@@ -230,6 +236,10 @@
     <div class="modal-overlay" @onclick="CloseReject">
         <div class="modal-card" @onclick:stopPropagation="true">
             <div class="modal-header">Reject: @Pretty(_rejecting.Value.DeterminantSignature)</div>
+            @if (_rejecting.CodeMeanings is not null)
+            {
+                <div class="review-code-meaning modal-code-meaning">@_rejecting.CodeMeanings</div>
+            }
             <div class="modal-body">
                 <p>
                     This rejection applies to every model with this configuration

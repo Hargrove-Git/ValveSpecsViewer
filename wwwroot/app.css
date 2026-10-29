@@ -1218,6 +1218,18 @@ textarea.field-input {
     color: var(--text-primary);
 }
 .review-summary-det { font-size: 0.8rem; color: var(--text-muted); }
+/* What the codes in a signature mean. Some descriptions run past 100 characters, so one line,
+   ellipsised, with the full text in the tooltip. */
+.review-code-meaning {
+    margin-top: 0.25rem;
+    max-width: 22rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.modal-code-meaning { max-width: none; white-space: normal; padding: 0 1.25rem; }
 .review-summary-counts { margin-left: auto; display: flex; gap: 0.75rem; font-family: var(--font-mono); font-size: 0.72rem; }
 .rs-approved { color: var(--blue); }
 .rs-rejected { color: var(--red); }

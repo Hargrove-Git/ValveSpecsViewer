@@ -171,7 +171,11 @@ public class SpecValue
 }
 
 /// A spec value plus how many known models it governs.
-public record SpecValueRow(SpecValue Value, int CoveredModels, string? SourceDocTitle);
+///
+/// `CodeMeanings` is what each code in the signature stands for, from the current grammar — e.g.
+/// "00 Non-Bellows". The signature alone reads `bellows 00`, which a reviewer took to mean bellows
+/// design; the code's own description is what removes that misreading.
+public record SpecValueRow(SpecValue Value, int CoveredModels, string? SourceDocTitle, string? CodeMeanings = null);
 
 /// Review progress for one dimension within a family.
 public record DimensionProgress(
