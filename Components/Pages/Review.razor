@@ -82,11 +82,21 @@
             }
         </div>
 
-        @if (_progress is not null && _progress.Any(p => !p.HasValues))
+        @* A dimension ruled N/A for the whole family has no values by design; listing it as
+           "not yet sourced" claimed open work that BBunch had already closed. *@
+        @if (_progress is not null && _progress.Any(p => !p.HasValues && p.NaForFamily))
+        {
+            <div class="review-na-family">
+                <strong>Not applicable for this family</strong>
+                @string.Join(", ", _progress.Where(p => !p.HasValues && p.NaForFamily).Select(p => p.Label))
+            </div>
+        }
+
+        @if (_progress is not null && _progress.Any(p => !p.HasValues && !p.NaForFamily))
         {
             <div class="decode-warn review-pending">
                 <strong>Not yet sourced</strong>
-                @string.Join(", ", _progress.Where(p => !p.HasValues).Select(p => p.Label))
+                @string.Join(", ", _progress.Where(p => !p.HasValues && !p.NaForFamily).Select(p => p.Label))
                 <span class="decode-warn-hint">
                     These dimensions are tracked for this family but have no values loaded yet —
                     their source or meaning is still being confirmed with the manufacturer.
@@ -283,6 +293,9 @@
 
     [CascadingParameter] private Task<AuthenticationState>? AuthStateTask { get; set; }
 
+    /// Opens on one family, e.g. /review?family=30 from the dashboard.
+    [SupplyParameterFromQuery(Name = "family")] public int? FamilyQuery { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         _families = await Specs.GetFamiliesWithSpecValuesAsync();
@@ -296,8 +309,14 @@
         if (AuthStateTask is not null)
             _currentUser = (await AuthStateTask).User.Identity?.Name ?? "";
 
+        var requested = _families.FirstOrDefault(f => f.Id == FamilyQuery);
+        if (requested is not null)
+        {
+            _manufacturerId = requested.ManufacturerId;
+            await SelectFamily(requested.Id);
+        }
         // Skip the extra click while there is only one of a thing to choose.
-        if (_manufacturers.Count == 1) await SelectManufacturer(_manufacturers[0].Id);
+        else if (_manufacturers.Count == 1) await SelectManufacturer(_manufacturers[0].Id);
     }
 
     private async Task SelectManufacturer(int manufacturerId)

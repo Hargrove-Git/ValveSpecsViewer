@@ -517,6 +517,9 @@ a:hover { text-decoration: underline; }
     text-decoration: line-through;
 }
 
+/* The rejected figure beside a resolved correction on /decode and /build: present, but secondary. */
+.resolve-original { font-size: 0.8rem; margin-left: 0.5rem; }
+
 .dim-corrected-value {
     font-family: var(--font-mono);
     font-size: 1.3rem;
@@ -1322,3 +1325,95 @@ textarea.field-input {
     font-size: 0.78rem; font-weight: 500; color: var(--accent);
     white-space: nowrap;
 }
+
+/* ── Dashboard (landing page) ────────────────────────────────── */
+/* Status colours follow the review page: approved blue, rejected red, unreviewed muted. */
+.dash-panel { max-width: 1100px; }
+.dash-link { font-size: 0.8rem; color: var(--blue); text-decoration: none; }
+.dash-link:hover { text-decoration: underline; }
+
+.dash-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.75rem;
+    margin-top: 1.25rem;
+}
+.dash-tiles + .dash-tiles { margin-top: 0.75rem; }
+.dash-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.9rem 1rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--border-light);
+    border-radius: var(--radius);
+}
+.dash-tile.dash-approved { border-left-color: var(--blue); }
+.dash-tile.dash-rejected { border-left-color: var(--red); }
+.dash-tile.dash-open     { border-left-color: var(--text-muted); }
+.dash-tile.dash-na       { border-left-color: var(--text-secondary); }
+.dash-tile-label {
+    font-family: var(--font-head);
+    font-weight: 600;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+.dash-tile-value { font-family: var(--font-mono); font-size: 1.6rem; color: var(--text-primary); line-height: 1.1; }
+.dash-tile-sub { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-secondary); }
+
+.dash-bar {
+    display: flex;
+    height: 10px;
+    margin-top: 1.25rem;
+    background: var(--surface-3);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.dash-bar span { display: block; height: 100%; }
+.dash-bar span + span { box-shadow: -1px 0 0 var(--bg); }
+.dash-bar .dash-approved, .dash-key.dash-approved { background: var(--blue); }
+.dash-bar .dash-rejected, .dash-key.dash-rejected { background: var(--red); }
+.dash-bar .dash-na,       .dash-key.dash-na       { background: var(--text-secondary); }
+.dash-bar .dash-open,     .dash-key.dash-open     { background: var(--border-light); }
+
+.dash-legend { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-secondary); }
+.dash-legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+.dash-key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+
+.dash-heading {
+    margin-top: 2rem;
+    font-family: var(--font-head);
+    font-weight: 700;
+    font-size: 0.85rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+.dash-scroll { overflow-x: auto; }
+.dash-table { margin-top: 0.5rem; }
+.dash-table .num { text-align: right; font-family: var(--font-mono); font-size: 0.8rem; white-space: nowrap; }
+.dash-table th.num { font-family: var(--font-head); }
+.dash-table .dash-bar-col { width: 22%; min-width: 120px; }
+.dash-table .dash-bar { margin-top: 0; height: 8px; }
+.dash-mfr-row { cursor: pointer; }
+.dash-mfr-row:hover td { background: var(--surface-2); }
+.dash-caret { display: inline-block; width: 1rem; color: var(--text-muted); }
+.dash-mfr { color: var(--text-primary); font-weight: 600; }
+.dash-count { margin-left: 0.5rem; font-size: 0.72rem; color: var(--text-muted); }
+.dash-family-row td:first-child { padding-left: 2rem; }
+.dash-family-row a { color: var(--blue); text-decoration: none; }
+.dash-family-row a:hover { text-decoration: underline; }
+.dash-note { margin-top: 1.5rem; font-size: 0.78rem; color: var(--text-muted); }
+.dash-note a { color: var(--blue); }
+
+@media (max-width: 640px) {
+    .dash-panel { padding: 1.25rem 1rem; }
+    .dash-table .dash-bar-col { display: none; }
+}
+
+/* Review page: dimensions ruled N/A for the whole family (settled, so not a warning). */
+.review-na-family { margin-bottom: 0.5rem; font-size: 0.8rem; color: var(--text-muted); }
+.review-na-family strong { color: var(--text-secondary); margin-right: 0.35rem; }

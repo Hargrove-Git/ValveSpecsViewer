@@ -29,6 +29,45 @@ public class SpecValueService(ValveSpecsDb db, GrammarService grammar)
             .ToListAsync();
     }
 
+    /// Review status across every family with tracked dimensions, for the dashboard. One grouped
+    /// query does the counting in SQL; there are thousands of values and only the counts are needed.
+    public async Task<DashboardSummary> GetDashboardAsync()
+    {
+        var families = await GetFamiliesWithSpecValuesAsync();
+
+        var counts = await db.SpecValues
+            .GroupBy(v => new { v.FamilyId, v.Dimension, v.ReviewStatus, v.ConfirmedNa })
+            .Select(g => new { g.Key.FamilyId, g.Key.Dimension, g.Key.ReviewStatus, g.Key.ConfirmedNa, N = g.Count() })
+            .ToListAsync();
+
+        static ReviewTally Tally<T>(IEnumerable<T> rows, Func<T, string> status, Func<T, bool> na, Func<T, int> n)
+        {
+            var list = rows.ToList();
+            return new(
+                list.Where(r => !na(r) && status(r) == ReviewStatus.Approved).Sum(n),
+                list.Where(r => !na(r) && status(r) == ReviewStatus.Rejected).Sum(n),
+                list.Where(r => !na(r) && status(r) != ReviewStatus.Approved && status(r) != ReviewStatus.Rejected).Sum(n),
+                list.Where(na).Sum(n));
+        }
+
+        var manufacturers = families
+            .GroupBy(f => f.Manufacturer?.Name ?? "(unknown)")
+            .OrderBy(g => g.Key)
+            .Select(g => new ManufacturerTally(g.Key, g
+                .Select(f => new FamilyTally(f.Id, f.FamilyName,
+                    Tally(counts.Where(c => c.FamilyId == f.Id), c => c.ReviewStatus, c => c.ConfirmedNa, c => c.N)))
+                .OrderBy(f => f.FamilyName)
+                .ToList()))
+            .ToList();
+
+        var dimensions = DimKey.All
+            .Select(d => new DimensionTally(d, DimKey.Label(d),
+                Tally(counts.Where(c => c.Dimension == d), c => c.ReviewStatus, c => c.ConfirmedNa, c => c.N)))
+            .ToList();
+
+        return new DashboardSummary(manufacturers, dimensions);
+    }
+
     /// Per-dimension review progress for a family — drives the dimension picker.
     public async Task<List<DimensionProgress>> GetProgressAsync(int familyId)
     {

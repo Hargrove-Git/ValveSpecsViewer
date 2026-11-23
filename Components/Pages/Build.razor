@@ -247,6 +247,11 @@
                                 @if (d.HasNumber)
                                 {
                                     <span class="dim-value">@d.Number?.ToString("0.####") @d.Value?.Unit</span>
+                                    @if (d.IsCorrected && d.OriginalNumber is not null)
+                                    {
+                                        <span class="dim-original-value resolve-original"
+                                              title="Original value, rejected">@d.OriginalNumber?.ToString("0.####")</span>
+                                    }
                                 }
                                 else if (!string.IsNullOrWhiteSpace(d.Value?.NaStatement))
                                 {
@@ -267,7 +272,7 @@
                                         <span class="role-badge role-viewer">UNREVIEWED</span>
                                         break;
                                     case ResolveState.Rejected:
-                                        <span class="role-badge role-approver">REJECTED</span>
+                                        <span class="role-badge role-approver" title="@d.Value?.ReviewNotes">@(d.IsCorrected ? "REJECTED · CORRECTED" : "REJECTED")</span>
                                         break;
                                     case ResolveState.NotApplicable:
                                         <span class="dim-na">N/A</span>

@@ -1,0 +1,184 @@
+@page "/"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject SpecValueService Specs
+
+<PageTitle>Dashboard — ValveSpecs</PageTitle>
+
+<div class="admin-panel dash-panel">
+    <div class="section-header">
+        <span class="section-title">DASHBOARD</span>
+        <a class="dash-link" href="/review">Review dimensions →</a>
+    </div>
+
+    @if (_summary is null)
+    {
+        <div class="loading-pulse">Loading…</div>
+    }
+    else
+    {
+        var all = _summary.Tally;
+
+        <div class="dash-tiles">
+            <div class="dash-tile">
+                <span class="dash-tile-label">Manufacturers</span>
+                <span class="dash-tile-value">@_summary.Manufacturers.Count</span>
+            </div>
+            <div class="dash-tile">
+                <span class="dash-tile-label">Valve families</span>
+                <span class="dash-tile-value">@_summary.FamilyCount</span>
+            </div>
+            <div class="dash-tile">
+                <span class="dash-tile-label">Dimension values</span>
+                <span class="dash-tile-value">@all.Total.ToString("N0")</span>
+            </div>
+        </div>
+
+        <div class="dash-tiles">
+            <div class="dash-tile dash-approved">
+                <span class="dash-tile-label">Approved</span>
+                <span class="dash-tile-value">@all.Approved.ToString("N0")</span>
+                <span class="dash-tile-sub">@Pct(all.Approved, all.Total)</span>
+            </div>
+            <div class="dash-tile dash-rejected">
+                <span class="dash-tile-label">Rejected</span>
+                <span class="dash-tile-value">@all.Rejected.ToString("N0")</span>
+                <span class="dash-tile-sub">@Pct(all.Rejected, all.Total)</span>
+            </div>
+            <div class="dash-tile dash-open">
+                <span class="dash-tile-label">Unreviewed</span>
+                <span class="dash-tile-value">@all.Unreviewed.ToString("N0")</span>
+                <span class="dash-tile-sub">@Pct(all.Unreviewed, all.Total)</span>
+            </div>
+            <div class="dash-tile dash-na">
+                <span class="dash-tile-label">Confirmed N/A</span>
+                <span class="dash-tile-value">@all.Na.ToString("N0")</span>
+                <span class="dash-tile-sub">@Pct(all.Na, all.Total)</span>
+            </div>
+        </div>
+
+        @Bar(all)
+        <div class="dash-legend">
+            <span><i class="dash-key dash-approved"></i>Approved</span>
+            <span><i class="dash-key dash-rejected"></i>Rejected</span>
+            <span><i class="dash-key dash-open"></i>Unreviewed</span>
+            <span><i class="dash-key dash-na"></i>Confirmed N/A</span>
+        </div>
+
+        <h3 class="dash-heading">By manufacturer</h3>
+        <div class="dash-scroll">
+            <table class="user-table dash-table">
+                <thead>
+                    <tr>
+                        <th>Manufacturer / family</th>
+                        <th class="num">Values</th>
+                        <th class="num">Approved</th>
+                        <th class="num">Rejected</th>
+                        <th class="num">Unreviewed</th>
+                        <th class="num">N/A</th>
+                        <th class="dash-bar-col">Progress</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var m in _summary.Manufacturers)
+                    {
+                        var open = _expanded.Contains(m.Manufacturer);
+                        <tr class="dash-mfr-row" @onclick="() => Toggle(m.Manufacturer)">
+                            <td>
+                                <span class="dash-caret">@(open ? "▾" : "▸")</span>
+                                <span class="dash-mfr">@m.Manufacturer</span>
+                                <span class="dash-count">@m.Families.Count @(m.Families.Count == 1 ? "family" : "families")</span>
+                            </td>
+                            @Cells(m.Tally)
+                        </tr>
+                        @if (open)
+                        {
+                            @foreach (var f in m.Families)
+                            {
+                                <tr class="dash-family-row">
+                                    <td><a href="@($"/review?family={f.FamilyId}")">@f.FamilyName</a></td>
+                                    @Cells(f.Tally)
+                                </tr>
+                            }
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <h3 class="dash-heading">By dimension</h3>
+        <div class="dash-scroll">
+            <table class="user-table dash-table">
+                <thead>
+                    <tr>
+                        <th>Dimension</th>
+                        <th class="num">Values</th>
+                        <th class="num">Approved</th>
+                        <th class="num">Rejected</th>
+                        <th class="num">Unreviewed</th>
+                        <th class="num">N/A</th>
+                        <th class="dash-bar-col">Progress</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var d in _summary.Dimensions)
+                    {
+                        <tr>
+                            <td>@d.Label</td>
+                            @Cells(d.Tally)
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <p class="dash-note">
+            Counts are the current dimension values, each keyed to the valve configuration it applies to.
+            Per-model legacy figures are under <a href="/legacy">Legacy Dimensions</a> in the menu.
+        </p>
+    }
+</div>
+
+@code {
+    private DashboardSummary? _summary;
+    private readonly HashSet<string> _expanded = [];
+
+    protected override async Task OnInitializedAsync() =>
+        _summary = await Specs.GetDashboardAsync();
+
+    private void Toggle(string manufacturer)
+    {
+        if (!_expanded.Remove(manufacturer)) _expanded.Add(manufacturer);
+    }
+
+    private static string Pct(int part, int total) =>
+        total == 0 ? "—" : $"{100.0 * part / total:0.#}%";
+
+    private static string Width(int part, int total) =>
+        total == 0 ? "0%" : $"{100.0 * part / total:0.###}%".Replace(',', '.');
+
+    private static RenderFragment Bar(ReviewTally t) => __builder =>
+    {
+        <div class="dash-bar" title="@($"{t.Approved} approved, {t.Rejected} rejected, {t.Unreviewed} unreviewed, {t.Na} N/A")">
+            @if (t.Total > 0)
+            {
+                <span class="dash-approved" style="width:@Width(t.Approved, t.Total)"></span>
+                <span class="dash-rejected" style="width:@Width(t.Rejected, t.Total)"></span>
+                <span class="dash-na" style="width:@Width(t.Na, t.Total)"></span>
+                <span class="dash-open" style="width:@Width(t.Unreviewed, t.Total)"></span>
+            }
+        </div>
+    };
+
+    private static RenderFragment Cells(ReviewTally t) => __builder =>
+    {
+        <td class="num">@t.Total.ToString("N0")</td>
+        <td class="num rs-approved">@Zero(t.Approved)</td>
+        <td class="num rs-rejected">@Zero(t.Rejected)</td>
+        <td class="num rs-open">@Zero(t.Unreviewed)</td>
+        <td class="num rs-na">@Zero(t.Na)</td>
+        <td class="dash-bar-col">@Bar(t)</td>
+    };
+
+    private static string Zero(int n) => n == 0 ? "–" : n.ToString("N0");
+}

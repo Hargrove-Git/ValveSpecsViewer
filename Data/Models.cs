@@ -182,6 +182,28 @@ public record DimensionProgress(
     string Dimension, string Label, bool NaForFamily, string Determinants,
     int Total, int Approved, int Rejected, int Unreviewed, int Na, bool HasValues);
 
+/// Review counts for the dashboard. Confirmed-N/A rows are counted apart, as on the review page:
+/// they are settled, so folding them into "unreviewed" would overstate the work left.
+public record ReviewTally(int Approved, int Rejected, int Unreviewed, int Na)
+{
+    public int Total => Approved + Rejected + Unreviewed + Na;
+    public static readonly ReviewTally Zero = new(0, 0, 0, 0);
+    public static ReviewTally operator +(ReviewTally a, ReviewTally b) =>
+        new(a.Approved + b.Approved, a.Rejected + b.Rejected, a.Unreviewed + b.Unreviewed, a.Na + b.Na);
+}
+
+public record FamilyTally(int FamilyId, string FamilyName, ReviewTally Tally);
+public record ManufacturerTally(string Manufacturer, List<FamilyTally> Families)
+{
+    public ReviewTally Tally => Families.Aggregate(ReviewTally.Zero, (t, f) => t + f.Tally);
+}
+public record DimensionTally(string Dimension, string Label, ReviewTally Tally);
+public record DashboardSummary(List<ManufacturerTally> Manufacturers, List<DimensionTally> Dimensions)
+{
+    public ReviewTally Tally => Manufacturers.Aggregate(ReviewTally.Zero, (t, m) => t + m.Tally);
+    public int FamilyCount => Manufacturers.Sum(m => m.Families.Count);
+}
+
 // ── Model-number grammar ────────────────────────────────────────
 
 public class GrammarVersion
@@ -355,8 +377,16 @@ public record ResolvedDimension(
     // Spelling it out a second time here had it backwards (SpecMin first instead of Nominal),
     // which would have shown two different numbers for the same row on the review and lookup
     // screens as soon as any dimension populated both columns.
-    public bool HasNumber => Value is { ConfirmedNa: false } v && v.Value is not null;
-    public decimal? Number => Value?.Value;
+    //
+    // A rejection that carries a correction resolves to the CORRECTION: the reviewer has said the
+    // extracted figure is wrong and what the right one is, so a lookup showing the rejected figure
+    // would hand out the number known to be bad. The original stays available as OriginalNumber.
+    // A correction also counts on a row extracted as N/A — the reviewer supplied a value that the
+    // extraction claimed did not exist.
+    public bool IsCorrected => State == ResolveState.Rejected && Value?.CorrectedValue is not null;
+    public bool HasNumber => IsCorrected || (Value is { ConfirmedNa: false } v && v.Value is not null);
+    public decimal? Number => IsCorrected ? Value!.CorrectedValue : Value?.Value;
+    public decimal? OriginalNumber => Value?.Value;
 }
 
 public record ResolveResult(
@@ -468,8 +498,10 @@ public static class DimKey
     public static string Label(string key) => key switch
     {
         Bore       => "Nozzle Bore Diameter",
-        SeatHeight => "Nozzle Seat Height",
-        FaceToSeat => "Face-to-Seat Dim",
+        // Named as on the Intellus repair form and as BBunch uses them (Nov 2026): nozzle_height holds the
+        // overall nozzle height; nozzle_dimension the small seat-step figure.
+        SeatHeight => "Overall Nozzle Height",
+        FaceToSeat => "Nozzle Dimension",
         DiscHolder => "Disc Holder OD",
         DiscThick  => "Disc Thickness",
         GuideId    => "Guide ID",
